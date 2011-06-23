@@ -2785,7 +2785,7 @@ class LoadImagesImageProvider(LoadImagesImageProviderBase):
         super(LoadImagesImageProvider, self).__init__(name, pathname, filename)
         self.rescale = rescale
     
-    def provide_image(self, image_set):
+    def provide_image(self, image_set, quiet_failure=False):
         """Load an image from a pathname
         """
         self.cache_file()
@@ -2806,9 +2806,10 @@ class LoadImagesImageProvider(LoadImagesImageProviderBase):
                     wants_max_intensity = True,
                     channel_names = channel_names)
             except:
-                logger.warning(
-                    "Failed to load %s with bioformats. Use PIL instead",
-                    self.get_full_name(), exc_info=True)
+                if not quiet_failure:
+                    logger.warning(
+                        "Failed to load %s with bioformats. Use PIL instead",
+                        self.get_full_name(), exc_info=True)
                 img, self.scale = load_using_PIL(self.get_full_name(),
                                                  rescale = self.rescale,
                                                  wants_max_intensity = True)

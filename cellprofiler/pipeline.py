@@ -1108,10 +1108,12 @@ class Pipeline(object):
                     yield group_number + 1, None, None, lambda workspace: self.post_group(workspace, grouping_keys)
 
         def possibly_on_demand(grouped_list):
-            """If the image_set_list has on_demand set to True, then
-            allow out-of-order processing, finding the next image
+            """Allow out-of-order processing, finding the next image
             that's ready.  This allows concurrent acquisition and
-            processing.
+            processing.  If all modules return the default (True) for
+            check_image_ready(), then processing will be in the usual
+            order, as images are listed in directories (or files if
+            using LoadData), but with groups processed together.
 
             Note that if images are grouped, reordering can only take
             place within groups, but groups might still be processed
@@ -1124,11 +1126,6 @@ class Pipeline(object):
             group() generator above, which might be a problem for very
             large image sets.
             """
-
-            if not image_set_list.on_demand:
-                for g in grouped_list:
-                    yield g
-                return
 
             current_group_number = None
             group_lists = {}
@@ -1155,7 +1152,7 @@ class Pipeline(object):
                         # triggering off of the first image (i.e., waiting for
                         # acquisition, grouping by plate).
                         first_image_number = group_lists[k][0][1]
-                        if self.check_image_ready(image_set_list, first_image_number) 
+                        if self.check_image_ready(image_set_list, first_image_number):
                             current_group_number = k
                             break
 
@@ -1163,27 +1160,28 @@ class Pipeline(object):
                     time.sleep(5)  # a typical acquisition time
                     continue
 
-                # find the next image set that's ready.  Note that
-                # when we enter this loop the first time, it will be
-                # the first image in the group based on the code
-                # above.
+                # find the next image set that's ready (except not the
+                # last image).  Note that when we enter this loop the
+                # first time, it will be the first image in the group
+                # based on the code above.
+                #
+                # note that the last entry in a group list is the
+                # post_group() callback (see above).
                 for idx, (group_index, image_number, callback) in enumerate(group_lists[current_group_number][:-1]):
                     if self.check_image_ready(image_set_list, image_number):
+                        print "YIELD", current_group_number, group_index, image_number, callback
                         yield current_group_number, group_index, image_number, callback
                         del group_lists[current_group_number][idx]
-                    else:
-                        time.sleep(5)
-                        break
+                        break  # this avoids the sleep below
+                else:
+                    time.sleep(5)
 
-                # are we down to the last image of the current group?
-                if len(group_lists[current_group_number] == 1):
-                    grp_idx, image_number, callback = group_lists[current_group_number][0]
-                    if not self.check_image_ready(image_set_list, image_number):
-                        time.sleep(5)
-                        continue
-                    yield (current_group_number, grp_idx, imnum, callback)
+                # are we done with this group?
+                if len(group_lists[current_group_number]) == 1:
+                    print "YIELDLAST", current_group_number, group_lists[current_group_number][0]
+                    yield (current_group_number,) + group_lists[current_group_number][0]
                     del group_lists[current_group_number]
-                    continue
+                    current_group_number = None
 
 
         columns = self.get_measurement_columns()

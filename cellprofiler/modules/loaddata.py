@@ -893,6 +893,7 @@ class LoadData(cpm.CPModule):
         return True
     
     def prepare_group(self, pipeline, image_set_list, grouping, image_numbers):
+        print "IN PREAPRE"
         dictionary = image_set_list.legacy_fields[self.legacy_field_key]
         image_names = self.other_providers('imagegroup')
         if self.wants_images.value:
@@ -902,6 +903,8 @@ class LoadData(cpm.CPModule):
                 for image_name in image_names:
                     ip = self.fetch_provider(image_name, dictionary, index)
                     image_set.providers.append(ip)
+                print image_set, image_names
+        print "PREPARED", image_names
 
     def check_image_ready(self, pipeline, image_set_list, image_number):
         if not (self.wants_images.value and self.on_demand.value):
@@ -917,9 +920,10 @@ class LoadData(cpm.CPModule):
         try:
             for image_name in image_names:
                 ip = self.fetch_provider(image_name, dictionary, index)
-                ip.provide_image(image_set)
+                ip.provide_image(image_set, quiet_failure=True)
         except:
             return False
+        print "IMAGE SET", image_number
         return True
 
     def fetch_provider(self, name, dictionary, index, is_image_name=True):
@@ -944,6 +948,7 @@ class LoadData(cpm.CPModule):
     def run(self, workspace):
         '''Populate the image measurements on each run iteration'''
         m = workspace.measurements
+        print "RUN", m.image_set_number
         assert isinstance(m, cpmeas.Measurements)
         dictionary = workspace.image_set_list.legacy_fields[self.legacy_field_key]
         statistics = []
