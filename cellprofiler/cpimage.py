@@ -645,6 +645,7 @@ class ImageSetList(object):
         self.__legacy_fields = {}
         self.__associating_by_key = None
         self.__test_mode = test_mode
+        self.__on_demand = False
         self.combine_path_and_file = False
     
     @property
@@ -752,10 +753,10 @@ class ImageSetList(object):
                 sort_order.append(key_values)
             d[key_values].append(i+1)
         return (keys, [(dict(zip(keys,k)),d[k]) for k in sort_order])
-    
+
     def save_state(self):
         '''Return a string that can be used to load the image_set_list's state
-        
+
         load_state will restore the image set list's state. No image_set can
         have image providers before this call.
         '''

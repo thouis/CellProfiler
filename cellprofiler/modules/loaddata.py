@@ -274,7 +274,7 @@ class LoadData(cpm.CPModule):
     
     module_name = "LoadData"
     category = 'File Processing'
-    variable_revision_number = 6
+    variable_revision_number = 7
 
     def create_settings(self):
         self.csv_directory = cps.DirectoryPath(
@@ -366,6 +366,20 @@ class LoadData(cpm.CPModule):
         self.row_range = cps.IntegerRange("Rows to process",
                                           (1,100000),1, doc = 
                                           """<i>(Used only if a range of rows is to be specified)</i><br>Enter the row numbers of the first and last row to be processed.""")
+
+        self.on_demand = cps.Binary("Process images as they become available?",
+                                    False, doc="""
+            Setting this option allows CellProfiler to process images
+            out of order, and as they become available.  If images are
+            grouped, groups will still be processed together.  If
+            CellProfiler cannot find any images ready for processing,
+            it will sleep a few seconds and try again.  <b>Note:</b>
+            if an image is missing for some reason, CellProfiler will
+            never stop trying to find it, but will continue checking
+            for it indefinitely.""")
+
+
+
         def do_reload():
             global header_cache
             header_cache = {}
@@ -373,7 +387,7 @@ class LoadData(cpm.CPModule):
                 self.open_csv()
             except:
                 pass
-            
+
         self.clear_cache_button = cps.DoSomething(
             "Reload cached information", "Reload", do_reload,
             doc = """Press this button to reload header information saved inside
@@ -393,8 +407,8 @@ class LoadData(cpm.CPModule):
         return [self.csv_directory,
                 self.csv_file_name, self.wants_images, self.image_directory,
                 self.wants_rows,
-                self.row_range, self.wants_image_groupings, 
-                self.metadata_fields, self.rescale]
+                self.row_range, self.wants_image_groupings,
+                self.metadata_fields, self.rescale, self.on_demand]
 
     def validate_module(self, pipeline):
         csv_path = self.csv_path
@@ -485,6 +499,7 @@ class LoadData(cpm.CPModule):
         result += [self.wants_rows]
         if self.wants_rows.value:
             result += [self.row_range]
+        result += [self.on_demand]
         return result
 
     def convert(self):
@@ -774,6 +789,7 @@ class LoadData(cpm.CPModule):
                 if not images.has_key(image):
                     images[image] = {}
                 images[image][C_FILE_NAME] = column
+                print "stored"
                 dictionary[feature] = column
             elif (self.wants_images.value and
                   is_path_name_feature(feature)):
@@ -837,14 +853,17 @@ class LoadData(cpm.CPModule):
                     if add_number:
                         key["number"] = i
                     image_set = image_set_list.get_image_set(key)
+                    print "repl", image_set.names
                 else:
                     image_set = image_set_list.get_image_set(i)
+                    print "prel", image_set.names
         #
         # Hide the measurements in the image_set_list
         #
         image_set_list.legacy_fields[self.legacy_field_key] = dictionary
+
         return True
-    
+
     def prepare_to_create_batch(self, pipeline, image_set_list, fn_alter_path):
         '''Prepare to create a batch file
         
@@ -884,7 +903,26 @@ class LoadData(cpm.CPModule):
                     ip = self.fetch_provider(image_name, dictionary, index)
                     image_set.providers.append(ip)
 
-    def fetch_provider(self, name, dictionary, index, is_image_name = True):
+    def check_image_ready(self, pipeline, image_set_list, image_number):
+        if not (self.wants_images.value and self.on_demand.value):
+            return True
+        # We can't just check if the files exist, as they may be
+        # incomplete.  Instead, we attempt to load the image itself.
+        # Note that this could fail if a microscope preallocates space
+        # for image data before writing the actual image.
+        dictionary = image_set_list.legacy_fields[self.legacy_field_key]
+        image_names = self.other_providers('imagegroup')
+        index = image_number - 1
+        image_set = image_set_list.get_image_set(index)
+        try:
+            for image_name in image_names:
+                ip = self.fetch_provider(image_name, dictionary, index)
+                ip.provide_image(image_set)
+        except:
+            return False
+        return True
+
+    def fetch_provider(self, name, dictionary, index, is_image_name=True):
         path_base = self.image_path
         if is_image_name:
             path_name_feature = make_path_name_feature(name)
@@ -1286,6 +1324,11 @@ class LoadData(cpm.CPModule):
             # Added rescaling option
             setting_values = setting_values + [ cps.YES ]
             variable_revision_number = 6
+        if variable_revision_number == 6 and (not from_matlab):
+            # Added on_demand option
+            setting_values = setting_values + [ cps.NO ]
+            variable_revision_number = 7
+
         return setting_values, variable_revision_number, from_matlab 
 
 LoadText = LoadData

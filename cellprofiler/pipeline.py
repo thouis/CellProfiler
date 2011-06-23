@@ -39,6 +39,7 @@ import threading
 import urlparse
 import urllib2
 import re
+import time
 
 logger = logging.getLogger(__name__)
 pipeline_stats_logger = logging.getLogger("PipelineStatistics")
@@ -1098,13 +1099,92 @@ class Pipeline(object):
                     if image_set_end is not None and image_number > image_set_end:
                         continue
                     if need_to_run_prepare_group:
-                        yield group_number+1, group_index+1, image_number,\
+                        yield group_number + 1, group_index+1, image_number,\
                               lambda: self.prepare_group(image_set_list, grouping_keys, image_numbers)
                     else:
-                        yield group_number+1, group_index+1, image_number, lambda: True
+                        yield group_number + 1, group_index+1, image_number, lambda: True
                     need_to_run_prepare_group = False
                 if not need_to_run_prepare_group:
-                    yield None, None, None, lambda workspace: self.post_group(workspace, grouping_keys)
+                    yield group_number + 1, None, None, lambda workspace: self.post_group(workspace, grouping_keys)
+
+        def possibly_on_demand(grouped_list):
+            """If the image_set_list has on_demand set to True, then
+            allow out-of-order processing, finding the next image
+            that's ready.  This allows concurrent acquisition and
+            processing.
+
+            Note that if images are grouped, reordering can only take
+            place within groups, but groups might still be processed
+            out of order.  Also, because of requirements on grouping,
+            the first and last images will be processed first and
+            last, respectively, regardless of what other images are
+            ready.
+
+            This function generates the entire grouped list from the
+            group() generator above, which might be a problem for very
+            large image sets.
+            """
+
+            if not image_set_list.on_demand:
+                for g in grouped_list:
+                    yield g
+                return
+
+            current_group_number = None
+            group_lists = {}
+            for group_number, group_index, image_number, callback in grouped_list:
+                print group_number, group_index, image_number, callback
+                group_lists.setdefault(group_number, []).append((group_index, image_number, callback))
+
+            while True:
+                if current_group_number is None:
+                    if len(group_lists) == 0: # are we done?
+                        return
+                    # hunt for a group with images ready
+                    for k in sorted(group_lists.keys()):
+                        if k is None:
+                            continue
+                        # check the first image, as we have to process
+                        # it before others because of its callback.
+                        #
+                        # XXX - Should we check for other image sets being
+                        # ready, as well?  It seems like a good idea, unless
+                        # someone is generating the next image in the set from
+                        # the previous image.  I expect that the most common use
+                        # of this functionality will work just fine with
+                        # triggering off of the first image (i.e., waiting for
+                        # acquisition, grouping by plate).
+                        first_image_number = group_lists[k][0][1]
+                        if self.check_image_ready(image_set_list, first_image_number) 
+                            current_group_number = k
+                            break
+
+                if current_group_number is None:  # we didn't find a group with images ready
+                    time.sleep(5)  # a typical acquisition time
+                    continue
+
+                # find the next image set that's ready.  Note that
+                # when we enter this loop the first time, it will be
+                # the first image in the group based on the code
+                # above.
+                for idx, (group_index, image_number, callback) in enumerate(group_lists[current_group_number][:-1]):
+                    if self.check_image_ready(image_set_list, image_number):
+                        yield current_group_number, group_index, image_number, callback
+                        del group_lists[current_group_number][idx]
+                    else:
+                        time.sleep(5)
+                        break
+
+                # are we down to the last image of the current group?
+                if len(group_lists[current_group_number] == 1):
+                    grp_idx, image_number, callback = group_lists[current_group_number][0]
+                    if not self.check_image_ready(image_set_list, image_number):
+                        time.sleep(5)
+                        continue
+                    yield (current_group_number, grp_idx, imnum, callback)
+                    del group_lists[current_group_number]
+                    continue
+
 
         columns = self.get_measurement_columns()
         
@@ -1125,7 +1205,7 @@ class Pipeline(object):
             measurements = None
             last_image_number = None
             pipeline_stats_logger.info("Times reported are CPU times for each module, not wall-clock time")
-            for group_number, group_index, image_number, closure in group(image_set_list):
+            for group_number, group_index, image_number, closure in possibly_on_demand(group(image_set_list)):
                 if image_number is None:
                     if not closure(workspace):
                         measurements.add_experiment_measurement(EXIT_STATUS,
@@ -1429,6 +1509,32 @@ class Pipeline(object):
             return undefined_tags
         else:
             return []
+
+    def check_image_ready(self, image_set_list, image_number):
+        '''Check if an image is ready for processing.
+
+        image_set_list - the image_set_list for the experiment. Add image
+                         providers to the image set list here.
+        image_number - the image number to check.
+
+        This function is used for on-demand processing, to allow
+        simultaneous acquisition and analysis with out-of-order
+        processing.
+
+        Returns True if the image is ready.
+        '''
+        for module in self.modules():
+            try:
+                if not module.check_image_ready(self, image_set_list, image_number):
+                    return False
+            except Exception, instance:
+                logger.error("Failed during check image ready in module %s (imagnumber %d)",
+                             module.module_name, image_number, exc_info=True)
+                event = RunExceptionEvent(instance, module, sys.exc_info()[2])
+                self.notify_listeners(event)
+                if event.cancel_run:
+                    return False
+        return True
                 
     def prepare_group(self, image_set_list, grouping, image_numbers):
         '''Prepare to start processing a new group

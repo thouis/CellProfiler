@@ -540,7 +540,27 @@ class CPModule(object):
         groupings.
         '''
         return None
-    
+
+    def check_image_ready(self, pipeline, image_set_list, image_number):
+        '''Check if an image is ready for processing.
+
+        pipeline - the pipeline being run
+        image_set_list - the image_set_list for the experiment. Add image
+                         providers to the image set list here.
+        image_number - the image number to check.
+
+        This function is used for on-demand processing, to allow
+        simultaneous acquisition and analysis with out-of-order
+        processing.
+
+        This function may be called multiple times, after prepare_run.
+
+        Returns True to indicate that the module is ready to provide
+        or process the image_set corresponding to image_number, False
+        if not.
+        '''
+        return True
+
     def prepare_group(self, pipeline, image_set_list, grouping,
                       image_numbers):
         '''Prepare to start processing a new grouping
