@@ -915,12 +915,13 @@ class LoadData(cpm.CPModule):
         # for image data before writing the actual image.
         dictionary = image_set_list.legacy_fields[self.legacy_field_key]
         image_names = self.other_providers('imagegroup')
+        print "CHECK", image_names, image_number
         index = image_number - 1
         image_set = image_set_list.get_image_set(index)
         try:
             for image_name in image_names:
                 ip = self.fetch_provider(image_name, dictionary, index)
-                ip.provide_image(image_set, quiet_failure=True)
+                print image_name, ip.provide_image(image_set, quiet_failure=True)
         except:
             return False
         print "IMAGE SET", image_number

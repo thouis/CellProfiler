@@ -1099,12 +1099,12 @@ class Pipeline(object):
                     if image_set_end is not None and image_number > image_set_end:
                         continue
                     if need_to_run_prepare_group:
-                        yield group_number + 1, group_index+1, image_number,\
-                              lambda: self.prepare_group(image_set_list, grouping_keys, image_numbers)
-                    else:
-                        yield group_number + 1, group_index+1, image_number, lambda: True
+                        # prepare group before starting, ignore return value
+                        yield group_number + 1, None, None, lambda workspace: (self.prepare_group(image_set_list, grouping_keys, image_numbers) or True)
+                    yield group_number + 1, group_index+1, image_number, lambda workspace: True
                     need_to_run_prepare_group = False
                 if not need_to_run_prepare_group:
+                    # finish group
                     yield group_number + 1, None, None, lambda workspace: self.post_group(workspace, grouping_keys)
 
         def possibly_on_demand(grouped_list):
@@ -1117,10 +1117,7 @@ class Pipeline(object):
 
             Note that if images are grouped, reordering can only take
             place within groups, but groups might still be processed
-            out of order.  Also, because of requirements on grouping,
-            the first and last images will be processed first and
-            last, respectively, regardless of what other images are
-            ready.
+            out of order.
 
             This function generates the entire grouped list from the
             group() generator above, which might be a problem for very
@@ -1130,40 +1127,33 @@ class Pipeline(object):
             current_group_number = None
             group_lists = {}
             for group_number, group_index, image_number, callback in grouped_list:
-                print group_number, group_index, image_number, callback
                 group_lists.setdefault(group_number, []).append((group_index, image_number, callback))
+            # note that the first and last entries in the group lists
+            # are the prepare_group() and post_group() calls.
 
             while True:
                 if current_group_number is None:
                     if len(group_lists) == 0: # are we done?
                         return
-                    # hunt for a group with images ready
+                    # hunt for a group with images ready, in order of group number
                     for k in sorted(group_lists.keys()):
-                        if k is None:
-                            continue
-                        # check the first image, as we have to process
-                        # it before others because of its callback.
-                        #
-                        # XXX - Should we check for other image sets being
-                        # ready, as well?  It seems like a good idea, unless
-                        # someone is generating the next image in the set from
-                        # the previous image.  I expect that the most common use
-                        # of this functionality will work just fine with
-                        # triggering off of the first image (i.e., waiting for
-                        # acquisition, grouping by plate).
-                        first_image_number = group_lists[k][0][1]
-                        if self.check_image_ready(image_set_list, first_image_number):
-                            current_group_number = k
+                        # check for any ready image, and when we find one, enter that group
+                        for _, image_number, _ in group_lists[k][1:-1]:  # skip prepare/post
+                            if self.check_image_ready(image_set_list, image_number):
+                                current_group_number = k
+                                # we're entering the group
+                                yield (current_group_number,) + group_lists[k][0]
+                                del group_lists[k][0]
+                                break
+                        if current_group_number is not None:
                             break
+                    else:
+                        # we didn't find a ready image set, so wait and try again
+                        time.sleep(5)  # a typical acquisition time
+                        continue
 
-                if current_group_number is None:  # we didn't find a group with images ready
-                    time.sleep(5)  # a typical acquisition time
-                    continue
-
-                # find the next image set that's ready (except not the
-                # last image).  Note that when we enter this loop the
-                # first time, it will be the first image in the group
-                # based on the code above.
+                # find the next image set that's ready.  Note that
+                # there must be at least one, given the loop above.
                 #
                 # note that the last entry in a group list is the
                 # post_group() callback (see above).
@@ -1177,15 +1167,18 @@ class Pipeline(object):
                     time.sleep(5)
 
                 # are we done with this group?
-                if len(group_lists[current_group_number]) == 1:
-                    print "YIELDLAST", current_group_number, group_lists[current_group_number][0]
-                    yield (current_group_number,) + group_lists[current_group_number][0]
+                if len(group_lists[current_group_number]) == 1:  # just the post_group() call
+                    print "YIELDLAST", current_group_number, group_lists[current_group_number][-1]
+                    yield (current_group_number,) + group_lists[current_group_number][-1]
                     del group_lists[current_group_number]
                     current_group_number = None
 
-
         columns = self.get_measurement_columns()
         
+        # This is created below, when the first module is run, but we
+        # need a value to pass to closure()
+        workspace = None
+
         if image_set_start is not None:
             assert isinstance(image_set_start, int), "Image set start must be an integer"
         if image_set_end is not None:
@@ -1211,8 +1204,6 @@ class Pipeline(object):
                         return
                     continue
                 image_set_count += 1
-                if not closure():
-                    return
                 if last_image_number is not None:
                     image_set_list.purge_image_set(last_image_number-1)
                 last_image_number = image_number

@@ -549,15 +549,37 @@ class CPModule(object):
                          providers to the image set list here.
         image_number - the image number to check.
 
-        This function is used for on-demand processing, to allow
-        simultaneous acquisition and analysis with out-of-order
-        processing.
+        This method is used to determine if a module is ready to
+        process a particular image set.  It returns True to indicate a
+        particular image is ready for processing, or False to indicate
+        that CellProfiler should check other image sets to see if they
+        are ready.
 
-        This function may be called multiple times, after prepare_run.
+        By default, CellProfiler will query image sets for readiness
+        in the order they occur within a directory or are listed in a
+        data file.  This method provides support for two types of
+        on-demand processing (along with the default behavior, in
+        which all iamges are assumed ready at the beginning):
+
+        - Wait-until-ready: in this mode, this method should always
+          return True, but may wait indefinitely until the given image
+          set is ready.  In this case, the processing will be in the
+          default order.
+
+        - Out-of-order: in this mode, this method returns False if the
+          given image set is not ready.  In this case, CellProfiler
+          may move on to another image set.  In this case, image set
+          groups will still be processed together, but the order
+          within and between groups depends on when images become available.
+
+        This method may be called multiple times, after prepare_run
+        has been called, and should probably be side-effect free.
 
         Returns True to indicate that the module is ready to provide
         or process the image_set corresponding to image_number, False
-        if not.
+        if not.  The method may delay its return until an image is
+        ready.  Returning False may result in images being processed
+        out of order.
         '''
         return True
 
