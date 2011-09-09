@@ -37,7 +37,6 @@ from errordialog import display_error_dialog, ED_CONTINUE, ED_STOP, ED_SKIP
 from runmultiplepipelinesdialog import RunMultplePipelinesDialog
 from cellprofiler.modules.loadimages import C_FILE_NAME, C_PATH_NAME, C_FRAME
 import cellprofiler.gui.parametersampleframe as psf
-import cellprofiler.distributed as cpdistributed
 
 logger = logging.getLogger(__name__)
 RECENT_FILE_MENU_ID = [wx.NewId() for i in range(cpprefs.RECENT_FILE_COUNT)]
@@ -716,27 +715,6 @@ class PipelineController:
         # Start the pipeline
         #
         ##################################
-
-        if cpdistributed.run_distributed():
-            try:
-                self.__module_view.disable()
-                self.__frame.preferences_view.on_analyze_images()
-                self.__distributor = cpdistributed.Distributor(self.__frame)
-                self.__distributor.start_serving(self.__pipeline, 8567, self.get_output_file_path(), self.status_callback)
-                print "serving at ", self.__distributor.server_URL
-                if self.__running_pipeline:
-                    self.__running_pipeline.close()
-                self.__running_pipeline = self.__distributor.run_with_yield()
-                self.__pipeline_measurements = self.__running_pipeline.next()
-            except Exception, e:
-                # Catastrophic failure
-                display_error_dialog(self.__frame,
-                                     e,
-                                     self.__pipeline,
-                                     "Failure in distributed work startup",
-                                     sys.exc_info()[2])
-                self.stop_running()
-            return
 
         output_path = self.get_output_file_path()
         if output_path:

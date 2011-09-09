@@ -71,6 +71,10 @@ class CreateBatchFiles(cpm.CPModule):
     #     processed by distributed workers, in which case, the default
     #     input and output directories are set to the temporary
     #     directory.
+    #     This setting will probably go away, after the distributed
+    #     code is rewritten.  At that point, it should be removed, and
+    #     upgrade_settings adjusted.  For now, this setting is always
+    #     false.
     module_name = "CreateBatchFiles"
     category = 'File Processing'
     variable_revision_number = 5

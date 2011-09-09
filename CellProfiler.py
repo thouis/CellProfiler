@@ -62,26 +62,6 @@ parser.add_option("-r", "--run",
                   dest="run_pipeline",
                   default=False,
                   help="Run the given pipeline on startup")
-distributed_support_enabled = True
-try:
-    import nuageux
-    parser.add_option("--distributed",
-                      action="store_true",
-                      dest="run_distributed",
-                      default=False,
-                      help="Distribute pipeline to workers (see --worker)")
-except:
-    distributed_support_enabled = False
-    logging.warn("Distributed support disabled: please install nuageux")
-    
-parser.add_option("--worker",
-                  dest="worker_mode_URL",
-                  default=None,
-                  help="Enter worker mode for the CellProfiler distributing work at URL (implies headless)")
-parser.add_option("--worker-timeout",
-                  dest="worker_timeout",
-                  default=15*60,
-                  help="Number of seconds the worker will continue trying to find work before exiting.")
 parser.add_option("-o", "--output-directory",
                   dest="output_directory",
                   default=None,
@@ -269,29 +249,6 @@ if (not hasattr(sys, 'frozen')) and options.build_extensions:
     if options.build_and_exit:
         exit()
 
-if distributed_support_enabled and options.run_distributed:
-    # force distributed mode
-    import cellprofiler.distributed as cpdistributed
-    cpdistributed.force_run_distributed = True
-
-# set up values for worker, which is basically a looping headless
-# pipeline runner with special methods to fetch pipelines and
-# first/last imagesets and for returning results.
-if options.worker_mode_URL is not None:
-    import time # for timeout calculationg below
-    import random
-    import cellprofiler.preferences as cpprefs
-    cpprefs.set_headless()
-    import cellprofiler.distributed as cpdistributed
-    options.show_gui = False
-    options.run_pipeline = True
-    assert options.groups == None, "groups not supported in distributed processing, yet"
-    try:
-        worker_timeout = int(options.worker_timeout)
-    except ValueError:
-        logging.root.fatal("Can't convert timeout value '%s' to an integer.", options.worker_timeout)
-        sys.exit(0)
-
 if options.show_gui and not options.output_html:
     import wx
     wx.Log.EnableLogging(False)
@@ -350,7 +307,7 @@ try:
     if options.output_html:
         sys.exit(0) 
     
-    if options.run_pipeline and not (options.pipeline_filename or options.worker_mode_URL):
+    if options.run_pipeline and not options.pipeline_filename:
         raise ValueError("You must specify a pipeline filename to run")
     
     if not options.first_image_set is None:
@@ -389,16 +346,12 @@ try:
                     options.pipeline_filename, "Error loading pipeline",
                     style = wx.OK | wx.ICON_ERROR)
         App.MainLoop()
-    elif options.run_pipeline: # this includes distributed workers
+    elif options.run_pipeline:
         if (options.pipeline_filename is not None) and (not options.pipeline_filename.lower().startswith('http')):
             options.pipeline_filename = os.path.expanduser(options.pipeline_filename)
-        if options.worker_mode_URL is not None:
-            last_success = time.time() # timeout checking for distributed workers.
-        continue_looping = True # for distributed workers
-        while continue_looping:
+
             from cellprofiler.pipeline import Pipeline, EXIT_STATUS
             import cellprofiler.measurements as cpmeas
-            continue_looping = False # distributed workers reset this, below
             pipeline = Pipeline()
             measurements = None
             try:
@@ -407,38 +360,7 @@ try:
                     measurements = cpmeas.load_measurements(options.pipeline_filename)
             except:
                 logging.root.info("Failed to load measurements from pipeline")
-            if options.worker_mode_URL is None:
-                # normal behavior
-                pipeline.load(options.pipeline_filename)
-            else:
-                # distributed worker
-                continue_looping = True
-                if time.time() - last_success > worker_timeout:
-                    logging.root.info("Worker timed out.  Exiting.")
-                    break
-
-                try:
-                    jobinfo = cpdistributed.fetch_work(options.worker_mode_URL)
-                except:
-                    # no answer from the server, or possibly a timeout
-                    logging.root.info("Failed to fetch work from server.", exc_info=True)
-                    logging.root.info("Retrying...")
-                    time.sleep(20 + random.randint(1, 10)) # avoid hammering server
-                    continue
-
-                if jobinfo.work_done():
-                    time.sleep(20 + random.randint(1, 10)) # avoid hammering server
-                    continue # loop until timeout
-
-                try:
-                    pipeline.load(jobinfo.pipeline_stringio())
-                    image_set_start = jobinfo.image_set_start
-                    image_set_end = jobinfo.image_set_end
-                except:
-                    logging.root.error("Can't parse pipeline for distributed work.", exc_info=True)
-                    logging.root.info("Retrying...")
-                    time.sleep(20 + random.randint(1, 10)) # avoid hammering server
-                    continue
+            pipeline.load(options.pipeline_filename)
             if options.groups is not None:
                 kvs = [x.split('=') for x in options.groups.split(',')]
                 groups = dict(kvs)
@@ -451,19 +373,7 @@ try:
                 grouping=groups,
                 measurements_filename = None if not use_hdf5 else args[0],
                 initial_measurements = measurements)
-            if options.worker_mode_URL is not None:
-                try:
-                    assert measurements is not None
-                    assert measurements.has_feature(cpmeas.EXPERIMENT, EXIT_STATUS)
-                    assert measurements.get_experiment_measurement(EXIT_STATUS) != 'Failure'
-                    jobinfo.report_measurements(pipeline, measurements)
-                    last_success = time.time()
-                except:
-                    logging.root.error("Couldn't return results to server", exc_info=True)
-                    logging.root.info("Continuing...")
-                    time.sleep(20 + random.randint(1, 10)) # avoid hammering server
-                    continue
-            elif len(args) > 0 and not use_hdf5:
+            if len(args) > 0 and not use_hdf5:
                 pipeline.save_measurements(args[0], measurements)
             if options.done_file is not None:
                 if (measurements is not None and 
