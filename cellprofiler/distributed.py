@@ -1,4 +1,4 @@
-
+import time
 import os.path
 import StringIO
 import zlib
@@ -33,7 +33,7 @@ class QueueDict(OrderedDict):
         for stp in xrange(0, n):
             key, value = self.popitem(last=False)
             self[key] = value
-        return value
+        return [key, value]
 
 class Distributor(object):
     def __init__(self):
@@ -45,7 +45,17 @@ class Distributor(object):
         self.work_queue = QueueDict()
 
     def start_serving(self, pipeline, output_file,
-                      address='tcp://127.0.0.1', port=None):
+                      address="tcp://127.0.0.1", port=5555):
+        self.prepare_queue(pipeline, output_file)
+        context, socket = self.prepare_socket(address, port)
+        #This is blocking
+        self.run(context, socket)
+
+    def prepare_queue(self, pipeline, output_file):
+
+        if(self.pipeline_path is not None):
+            #Assume we have already prepared queue
+            return
 
         self.output_file = output_file
 
@@ -90,6 +100,7 @@ class Distributor(object):
         #Read it back into memory
         raw_pipeline_file = open(raw_pipeline_path, 'r')
         pipeline_txt = raw_pipeline_file.read()
+
         pipeline_fd, pipeline_path = tempfile.mkstemp()
         pipeline_file = open(pipeline_path, 'w')
 
@@ -108,10 +119,57 @@ class Distributor(object):
             self.work_queue[img_set_index + 1] = \
                 {'pipeline_hash': self.pipeline_blob_hash}
 
-        # start serving
         self.total_jobs = image_set_list.count()
 
-        self.run(address, port)
+    def prepare_socket(self, address='tcp://127.0.0.1', port=None):
+        context = zmq.Context()
+        socket = context.socket(zmq.REP)
+        if(port is not None):
+            self.url = "%s:%s" % (address, int(port))
+            socket.bind(self.url)
+        else:
+            port = socket.bind_to_random_port(address)
+            self.url = "%s:%s" % (address, port)
+
+        return context, socket
+
+    def run(self, context, socket):
+        self.jobs_finished = 0
+
+        print 'server running on %s' % self.url
+        self.running = True
+        while self.running:
+            #XXX Implement a timeout
+            raw_msg = socket.recv()
+            msg = parse_json(raw_msg)
+
+            response = {'status': 'bad request'}
+            if((msg is None) or ('type' not in msg)):
+                #TODO Log something
+                pass
+            elif(msg['type'] == 'pipeline_path'):
+                response = self.get_pipeline_info()
+            elif(msg['type'] == 'next_job'):
+                job = self.get_next()
+                if(job is None):
+                    response = {'status': 'nowork'}
+                else:
+                    #job = [key,value]. value is a dict of the properties
+                    response = {'id': job[0]}
+                    response.update(job[1])
+            elif((msg['type'] == 'result') and ('result' in msg)):
+                response = self.report_results(msg)
+            elif((msg['type']) == 'command'):
+                response = self.receive_command(msg)
+
+            socket.send(json.dumps(response))
+
+            self.running &= self.has_work()
+
+        socket.close()
+        context.term()
+
+        self.stop_serving()
 
     def has_work(self):
         return len(self.work_queue) > 0
@@ -161,7 +219,7 @@ class Distributor(object):
             response = {'status': 'success', 'remaining': len(self.work_queue)}
         return response
 
-    def receive_control(self, msg):
+    def receive_command(self, msg):
         """
         Control commands from client to server.
 
@@ -171,69 +229,29 @@ class Distributor(object):
         command = msg['command'].lower()
         if(command == 'stop'):
             self.running = False
-            response = {'status':'stopping'}
+            response = {'status': 'stopping'}
         elif(command == 'remove'):
             jobid = '?'
             try:
-                jobid = msg['jobid']
-                response = {'id':jobid}
+                jobid = msg['id']
+                response = {'id': jobid}
                 del self.work_queue[jobid]
                 response['status'] = 'success'
             except KeyError, exc:
-                logger.log('could not delete jobid %s: %s' % (jobid, exc))
+                logger.error('could not delete jobid %s: %s' % (jobid, exc))
                 response['status'] = 'notfound'
         return response
-
-    def run(self, address, port):
-        context = zmq.Context()
-        sender = context.socket(zmq.REP)
-        if(port is not None):
-            self.server_URL = "%s:%s" % (address, port)
-            sender.bind(self.server_URL)
-        else:
-            port = sender.bind_to_random_port(address)
-            self.server_URL = "%s:%s" % (address, port)
-
-        self.jobs_finished = 0
-
-        self.running = True
-        while self.running:
-            #XXX Implement a timeout
-            raw_msg = sender.rcv()
-            msg = parse_json(raw_msg)
-
-            response = {'status': 'bad request'}
-            if((msg is None) or ('type' not in msg)):
-                #TODO Log something
-                pass
-            elif(msg['type'] == 'pipeline_path'):
-                response = self.get_pipeline_info()
-            elif(msg['type'] == 'next_job'):
-                job = self.get_next()
-                if(job is None):
-                    response = {'status': 'nowork'}
-                else:
-                    response = {'id': job[0], 'pipeline_hash': job[1]}
-            elif((msg['type'] == 'result') and ('result' in msg)):
-                response = self.report_results(msg)
-            elif((msg['type']) == 'control'):
-                response = self.receive_control(msg)
-
-            sender.send(json.dumps(response))
-
-            self.running &= self.has_work()
-
-        sender.close()
-        context.term()
-
-        self.stop_serving()
 
     def stop_serving(self):
         self.running = False
         self.work_queue.clear()
-        if self.pipeline_path:
-            os.unlink(self.pipeline_path)
-            self.pipeline_path = None
+        if 'file://' in self.pipeline_path:
+            path = self.pipeline_path[len('file://')::]
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        self.pipeline_path = None
 
 class JobTransit(object):
     def __init__(self, url, context=None, socket=None):
@@ -250,7 +268,7 @@ class JobTransit(object):
         self.socket.connect(self.url)
 
     def _get_pipeline_blob(self):
-        self.socket.send({'type': 'pipeline_path'})
+        self.socket.send(json.dumps({'type': 'pipeline_path'}))
         raw_msg = self.socket.recv()
         msg = parse_json(raw_msg)
 
@@ -260,13 +278,13 @@ class JobTransit(object):
         try:
             pipeline_path = msg['path']
         except KeyError:
-            logger.log('path not found in response')
+            logger.error('path not found in response')
             return None
 
         return urllib2.urlopen(pipeline_path).read()
 
     def fetch_job(self):
-        self.socket.send(json.dumps({'type': 'next_job'}))
+        tracker = self.socket.send(json.dumps({'type': 'next_job'}), copy=True, track=True)
         raw_msg = self.socket.recv()
         msg = parse_json(raw_msg)
         if(not msg):
@@ -274,30 +292,31 @@ class JobTransit(object):
 
         if msg.get('status', '').lower() == 'nowork':
             print "No work to be had."
-            return JobInfo(-1, -1, 'no_work', '', -1)
+            return JobInfo(-1, -1, 'no_work', '', -1, False)
 
         # fetch the pipeline
         pipeline_blob = self._get_pipeline_blob()
-        pipeline_hash = hashlib.sha1(pipeline_blob).hexdigest()
+        pipeline_hash_local = hashlib.sha1(pipeline_blob).hexdigest()
 
         try:
             job_num = msg['id']
-            pipeline_hash = msg['pipeline_hash']
+            pipeline_hash_rem = msg['pipeline_hash']
             image_num = int(job_num)
-            jobinfo = JobInfo(image_num, image_num, pipeline_blob, pipeline_hash, job_num)
-            valid = pipeline_hash == self.pipeline_hash
-            if(not valid):
-                logger.log("Mismatched hash, probably out of sync with server")
+            jobinfo = JobInfo(image_num, image_num, pipeline_blob, pipeline_hash_local, job_num)
+
+            jobinfo.is_valid = pipeline_hash_local == pipeline_hash_rem
+            if(not jobinfo.is_valid):
+                logger.info("Mismatched hash, probably out of sync with server")
             return jobinfo
         except KeyError, exc:
-            logger.log('KeyError: %s' % exc)
+            logger.debug('KeyError: %s' % exc)
             return None
 
     def report_measurements(self, pipeline, measurements):
         meas_file = open(measurements.hdf5_dict.filename, 'r+b')
         out_measurements = meas_file.read()
 
-        msg = {'type': 'results', 'result': out_measurements}
+        msg = {'type': 'result', 'result': out_measurements}
         raw_msg = json.dumps(msg)
         self.socket.send(raw_msg)
         resp = self.socket.recv()
@@ -305,21 +324,30 @@ class JobTransit(object):
 
 class JobInfo(object):
     def __init__(self, image_set_start, image_set_end,
-                 pipeline_blob, pipeline_hash, job_num):
+                 pipeline_blob, pipeline_hash, job_num, is_valid=True):
         self.image_set_start = image_set_start
         self.image_set_end = image_set_end
         self.pipeline_blob = pipeline_blob
         self.pipeline_hash = pipeline_hash
         self.job_num = job_num
+        self.is_valid = is_valid
 
     def pipeline_stringio(self):
         return StringIO.StringIO(zlib.decompress(self.pipeline_blob))
 
+def send_with_timeout(socket, msg, timeout=5):
+    tracker = socket.send(msg, copy=True, track=True)
+    start_time = time.clock()
+    while(not tracker.done):
+        time.sleep(0.05)
+        if(time.clock() - start_time > timeout):
+            return None
 
-def parse_json(self, raw_msg):
+
+def parse_json(raw_msg):
     try:
         msg = json.loads(raw_msg)
     except ValueError:
-        logger.log('could not parse json: %s' % raw_msg)
+        logger.error('could not parse json: %s' % raw_msg)
         return None
     return msg
