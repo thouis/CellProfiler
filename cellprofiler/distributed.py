@@ -105,7 +105,8 @@ class Distributor(object):
         # add jobs for each image set
         #XXX Maybe use guid instead of img_set_index?
         for img_set_index in range(image_set_list.count()):
-            self.work_queue[img_set_index + 1] = "%s" % self.pipeline_blob_hash
+            self.work_queue[img_set_index + 1] = \
+                {'pipeline_hash': self.pipeline_blob_hash}
 
         # start serving
         self.total_jobs = image_set_list.count()
@@ -124,10 +125,10 @@ class Distributor(object):
 
     def get_pipeline_info(self):
         return {'path': self.pipeline_path,
-                    'hash': self.pipeline_blob_hash}
+                    'pipeline_hash': self.pipeline_blob_hash}
 
     def report_results(self, msg):
-        jobnum = msg['jobnum']
+        jobnum = msg['id']
         pipeline_hash = msg['pipeline_hash']
         work_item = self.work_queue.get(jobnum, None)
         response = {'status': 'failure'}
@@ -160,6 +161,29 @@ class Distributor(object):
             response = {'status': 'success', 'remaining': len(self.work_queue)}
         return response
 
+    def receive_control(self, msg):
+        """
+        Control commands from client to server.
+
+        For now we use these for testing, should implement
+        some type of security before release
+        """
+        command = msg['command'].lower()
+        if(command == 'stop'):
+            self.running = False
+            response = {'status':'stopping'}
+        elif(command == 'remove'):
+            jobid = '?'
+            try:
+                jobid = msg['jobid']
+                response = {'id':jobid}
+                del self.work_queue[jobid]
+                response['status'] = 'success'
+            except KeyError, exc:
+                logger.log('could not delete jobid %s: %s' % (jobid, exc))
+                response['status'] = 'notfound'
+        return response
+
     def run(self, address, port):
         context = zmq.Context()
         sender = context.socket(zmq.REP)
@@ -172,34 +196,32 @@ class Distributor(object):
 
         self.jobs_finished = 0
 
-        running = True
-        while running:
+        self.running = True
+        while self.running:
             #XXX Implement a timeout
             raw_msg = sender.rcv()
-            msg = json.loads(raw_msg)
+            msg = parse_json(raw_msg)
+
             response = {'status': 'bad request'}
-            if('type' not in msg):
+            if((msg is None) or ('type' not in msg)):
                 #TODO Log something
-                continue
-            if(msg['type'] == 'pipeline_path'):
+                pass
+            elif(msg['type'] == 'pipeline_path'):
                 response = self.get_pipeline_info()
-            if(msg['type'] == 'next_job'):
+            elif(msg['type'] == 'next_job'):
                 job = self.get_next()
                 if(job is None):
-                    job = {'status': 'nowork'}
-                response = job
+                    response = {'status': 'nowork'}
+                else:
+                    response = {'id': job[0], 'pipeline_hash': job[1]}
             elif((msg['type'] == 'result') and ('result' in msg)):
                 response = self.report_results(msg)
-            elif(msg['type'] == 'stop'):
-                #Something of a security risk.
-                #Anybody can just tell the server to stop?
-                #While we're on the subject, this may not be a secure way
-                #of passing data. Maybe implement crypto signatures?
-                response = {'status': 'stopping'}
+            elif((msg['type']) == 'control'):
+                response = self.receive_control(msg)
 
             sender.send(json.dumps(response))
 
-            running &= self.has_work()
+            self.running &= self.has_work()
 
         sender.close()
         context.term()
@@ -207,73 +229,97 @@ class Distributor(object):
         self.stop_serving()
 
     def stop_serving(self):
+        self.running = False
+        self.work_queue.clear()
         if self.pipeline_path:
             os.unlink(self.pipeline_path)
             self.pipeline_path = None
 
-class JobInfo(object):
-    def __init__(self, base_url):
-        self.base_url = base_url
-        self.image_set_start = None
-        self.image_set_end = None
-        self.pipeline_hash = None
-        self.pipeline_blob = None
-        self.job_num = None
-        self.context = None
-        self.socket = None
-        self.connected = False
+class JobTransit(object):
+    def __init__(self, url, context=None, socket=None):
+        self.url = url
+        self.context = context
+        self.socket = socket
+        if(self.socket is None):
+            self._init_connection()
 
     def _init_connection(self):
-        self.context = zmq.Context()
+        if(self.context is None):
+            self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REQ)
-        self.socket.connect(self.base_url)
-        self.connected = True
-
-    def fetch_job(self):
-        # fetch the pipeline
-        self._get_pipeline_blob()
-        self.pipeline_hash = hashlib.sha1(self.pipeline_blob).hexdigest()
-
-        if(not self.connected):
-            self._init_connection()
-        self.socket.send(json.dumps({'type': 'next_job'}))
-        raw_msg = self.socket.recv()
-        msg = json.loads(raw_msg)
-        if msg.get('status', '').lower() == 'nowork':
-            assert False, "No work to be had..."
-        self.job_num = msg.keys()[0]
-        pipeline_hash = msg[self.job_num]
-        image_num = self.job_num
-        self.image_set_start = int(image_num)
-        self.image_set_end = int(image_num)
-
-        assert pipeline_hash == self.pipeline_hash, "Mismatched hash, probably out of sync with server"
+        self.socket.connect(self.url)
 
     def _get_pipeline_blob(self):
-        if(not self.connected):
-            self._init_connection()
         self.socket.send({'type': 'pipeline_path'})
         raw_msg = self.socket.recv()
-        msg = json.loads(raw_msg)
-        pipeline_path = msg['path']
-        self.pipeline_blob = urllib2.urlopen(pipeline_path).read()
+        msg = parse_json(raw_msg)
 
-    def pipeline_stringio(self):
-        if(not self.pipeline_blob):
-            self._get_pipeline_blob()
-        return StringIO.StringIO(zlib.decompress(self.pipeline_blob))
+        if(not msg):
+            return None
+
+        try:
+            pipeline_path = msg['path']
+        except KeyError:
+            logger.log('path not found in response')
+            return None
+
+        return urllib2.urlopen(pipeline_path).read()
+
+    def fetch_job(self):
+        self.socket.send(json.dumps({'type': 'next_job'}))
+        raw_msg = self.socket.recv()
+        msg = parse_json(raw_msg)
+        if(not msg):
+            return None
+
+        if msg.get('status', '').lower() == 'nowork':
+            print "No work to be had."
+            return JobInfo(-1, -1, 'no_work', '', -1)
+
+        # fetch the pipeline
+        pipeline_blob = self._get_pipeline_blob()
+        pipeline_hash = hashlib.sha1(pipeline_blob).hexdigest()
+
+        try:
+            job_num = msg['id']
+            pipeline_hash = msg['pipeline_hash']
+            image_num = int(job_num)
+            jobinfo = JobInfo(image_num, image_num, pipeline_blob, pipeline_hash, job_num)
+            valid = pipeline_hash == self.pipeline_hash
+            if(not valid):
+                logger.log("Mismatched hash, probably out of sync with server")
+            return jobinfo
+        except KeyError, exc:
+            logger.log('KeyError: %s' % exc)
+            return None
 
     def report_measurements(self, pipeline, measurements):
         meas_file = open(measurements.hdf5_dict.filename, 'r+b')
         out_measurements = meas_file.read()
-        if(not self.connected):
-            self._init_connection()
+
         msg = {'type': 'results', 'result': out_measurements}
         raw_msg = json.dumps(msg)
         self.socket.send(raw_msg)
+        resp = self.socket.recv()
+        return self._parse_response(resp)
+
+class JobInfo(object):
+    def __init__(self, image_set_start, image_set_end,
+                 pipeline_blob, pipeline_hash, job_num):
+        self.image_set_start = image_set_start
+        self.image_set_end = image_set_end
+        self.pipeline_blob = pipeline_blob
+        self.pipeline_hash = pipeline_hash
+        self.job_num = job_num
+
+    def pipeline_stringio(self):
+        return StringIO.StringIO(zlib.decompress(self.pipeline_blob))
 
 
-def fetch_work(base_URL):
-    jobinfo = JobInfo(base_URL)
-    jobinfo.fetch_job()
-    return jobinfo
+def parse_json(self, raw_msg):
+    try:
+        msg = json.loads(raw_msg)
+    except ValueError:
+        logger.log('could not parse json: %s' % raw_msg)
+        return None
+    return msg
