@@ -118,7 +118,7 @@ class TestDistributor(unittest.TestCase):
         time.sleep(1)
         self.assertFalse(server_proc.is_alive())
 
-    def test_get_work_01(self):
+    def tst_get_work_01(self):
         """
         Prepare a queue of work.
         Keep getting work but don't report results,
@@ -146,9 +146,42 @@ class TestDistributor(unittest.TestCase):
             self.assertEqual(exp_tri, act_tri, 'Job Numbers do not match')
 
         self._stop_serving_clean()
-        still_running = server_proc.is_alive()
-        if(still_running):
-            server_proc.terminate()
-        self.assertFalse(still_running, 'Server still running, had to terminate')
 
+    def test_remove_work(self):
+        """
+        Get jobs and delete them from server (do not report results)
+        """
+        self.distributor.prepare_queue(self.pipeline, self.output_file)
+        num_jobs = self.distributor.total_jobs
+        del self.distributor
+        self.setUp()
+
+        server_proc = self._start_serving()
+        self.assertTrue(server_proc.is_alive())
+        url = "%s:%s" % (self.address, self.port)
+        fetcher = JobTransit(url)
+
+        controller = self.context.socket(zmq.REQ)
+        controller.connect(url)
+
+        received = set()
+        while True:
+            job = fetcher.fetch_job()
+            is_valid = job.is_valid
+            if(not is_valid):
+                break
+            msg = {'type':'command',
+                   'command':'remove',
+                   'id':job.job_num}
+            controller.send(json.dumps(msg))
+            rec = parse_json(controller.recv())
+            self.assertTrue(rec['status'] == 'success')
+            received.add(job.job_num)
+            if(job.num_remaining == 1):
+                break
+
+        act_num_jobs = len(received)
+        self.assertTrue(num_jobs, act_num_jobs)
+        expected = set(xrange(1, num_jobs + 1))
+        self.assertTrue(expected, received)
 

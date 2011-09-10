@@ -155,7 +155,7 @@ class Distributor(object):
                     response = {'status': 'nowork'}
                 else:
                     #job = [key,value]. value is a dict of the properties
-                    response = {'id': job[0]}
+                    response = {'id': job[0], 'num_remaining':self.num_remaining()}
                     response.update(job[1])
             elif((msg['type'] == 'result') and ('result' in msg)):
                 response = self.report_results(msg)
@@ -164,15 +164,15 @@ class Distributor(object):
 
             socket.send(json.dumps(response))
 
-            self.running &= self.has_work()
+            self.running &= (self.num_remaining() > 0)
 
         socket.close()
         context.term()
 
         self.stop_serving()
 
-    def has_work(self):
-        return len(self.work_queue) > 0
+    def num_remaining(self):
+        return len(self.work_queue)
 
     def get_next(self):
         try:
@@ -303,6 +303,7 @@ class JobTransit(object):
             pipeline_hash_rem = msg['pipeline_hash']
             image_num = int(job_num)
             jobinfo = JobInfo(image_num, image_num, pipeline_blob, pipeline_hash_local, job_num)
+            jobinfo.num_remaining = msg['num_remaining']
 
             jobinfo.is_valid = pipeline_hash_local == pipeline_hash_rem
             if(not jobinfo.is_valid):
@@ -324,13 +325,15 @@ class JobTransit(object):
 
 class JobInfo(object):
     def __init__(self, image_set_start, image_set_end,
-                 pipeline_blob, pipeline_hash, job_num, is_valid=True):
+                 pipeline_blob, pipeline_hash, job_num, is_valid=True,
+                 num_remaining=None):
         self.image_set_start = image_set_start
         self.image_set_end = image_set_end
         self.pipeline_blob = pipeline_blob
         self.pipeline_hash = pipeline_hash
         self.job_num = job_num
         self.is_valid = is_valid
+        self.num_remaining = num_remaining
 
     def pipeline_stringio(self):
         return StringIO.StringIO(zlib.decompress(self.pipeline_blob))
