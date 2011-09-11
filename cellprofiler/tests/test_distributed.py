@@ -8,22 +8,25 @@ import zmq
 
 from cellprofiler.modules.tests import example_images_directory
 from cellprofiler.pipeline import Pipeline
-from cellprofiler.distributed import Distributor, parse_json, JobTransit
+from cellprofiler.distributed import JobTransit, JobInfo
+from cellprofiler.distributed import  Distributor, parse_json
 import cellprofiler.preferences as cpprefs
 from cellprofiler.multiprocess import single_job, worker_looper
+import cellprofiler.measurements as cpmeas
 
 
 class TestDistributor(unittest.TestCase):
 
     def setUp(self):
         self.address = "tcp://127.0.0.1"
-        self.port = 10006
+        self.port = 5577
 
         info = self.id().split('.')[-1]
         output_finame = info + '.h5'
 
         ex_dir = example_images_directory()
-        img_dir = os.path.join(ex_dir, "ExampleWoundHealingImages")
+        self.img_dir = os.path.join(ex_dir, "ExampleWoundHealingImages")
+        img_dir = self.img_dir
         pipeline_path = os.path.join(img_dir, 'ExampleWoundHealing.cp')
         self.output_file = os.path.join(img_dir, output_finame)
 
@@ -181,17 +184,36 @@ class TestDistributor(unittest.TestCase):
         transit = JobTransit(url)
         jobinfo = transit.fetch_job()
         measurement = single_job(jobinfo)
+        #print measurement
         self._stop_serving_clean()
 
     def test_worker_looper(self):
         self._start_serving()
         url = '%s:%s' % (self.address, self.port)
         responses = worker_looper(url)
+        print responses
+        self._stop_serving_clean()
+
+    def test_report_measurements(self):
+        self._start_serving()
+        url = '%s:%s' % (self.address, self.port)
+
+        test_dir = os.path.dirname(os.path.abspath(__file__))
+        test_data_dir = os.path.join(test_dir, 'data')
+
+        meas_file = os.path.join(test_data_dir, 'Cpmeasurementsam6C7Z.hdf5')
+        curr_meas = cpmeas.load_measurements(filename=meas_file)
+        transit = JobTransit(url)
+        jobinfo = JobInfo(0, 0, None, None, 1)
+
+        response = transit.report_measurements(jobinfo, curr_meas)
+        self.assertTrue('code' in response)
+        self.assertTrue('mismatched pipeline hash' in response['code'])
         self._stop_serving_clean()
 
 def suite():
     suite = unittest.TestSuite()
-    suite.addTest(TestDistributor('test_single_job'))
+    suite.addTest(TestDistributor('test_report_measurements'))
     return suite
 
 if __name__ == "__main__":
