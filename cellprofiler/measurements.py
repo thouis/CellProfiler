@@ -592,18 +592,19 @@ class Measurements(object):
         assert isinstance(measurements, Measurements)
         obj_names = measurements.get_object_names()
 
+
+        image_numbers = measurements.get_image_numbers()
         for obj_name in obj_names:
             if obj_name == EXPERIMENT:
                 obj_overwrite = False
             else:
-                obj_overwrite = True and can_overwrite
+                obj_overwrite = can_overwrite
             feature_names = measurements.get_feature_names(obj_name)
-            image_numbers = measurements.get_image_numbers()
 
             for feat_name in feature_names:
-                if(self.has_feature(obj_name, feat_name) and not obj_overwrite):
-                    continue
                 for img_num in image_numbers:
+                    if(self.has_measurements(obj_name, feat_name, img_num) and not obj_overwrite):
+                        continue
                     dat = measurements.get_measurement(obj_name, feat_name, img_num)
                     self.add_measurement(obj_name, feat_name, dat,
                                          can_overwrite=can_overwrite,
