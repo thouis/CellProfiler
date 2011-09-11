@@ -23,8 +23,8 @@ class TestDistributor(unittest.TestCase):
         output_finame = info + '.h5'
 
         ex_dir = example_images_directory()
-        img_dir = os.path.join(ex_dir, "ExampleFlyImages")
-        pipeline_path = os.path.join(img_dir, 'ExampleFly.cp')
+        img_dir = os.path.join(ex_dir, "ExampleWoundHealingImages")
+        pipeline_path = os.path.join(img_dir, 'ExampleWoundHealing.cp')
         self.output_file = os.path.join(img_dir, output_finame)
 
         self.pipeline = Pipeline()
@@ -177,11 +177,17 @@ class TestDistributor(unittest.TestCase):
 
     def test_single_job(self):
         self._start_serving()
-
         url = '%s:%s' % (self.address, self.port)
         transit = JobTransit(url)
         jobinfo = transit.fetch_job()
         measurement = single_job(jobinfo)
+        self._stop_serving_clean()
+
+    def test_worker_looper(self):
+        self._start_serving()
+        url = '%s:%s' % (self.address, self.port)
+        responses = worker_looper(url)
+        self._stop_serving_clean()
 
 def suite():
     suite = unittest.TestSuite()
