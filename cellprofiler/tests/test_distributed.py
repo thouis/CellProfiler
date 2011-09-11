@@ -14,6 +14,8 @@ import cellprofiler.preferences as cpprefs
 from cellprofiler.multiprocess import single_job, worker_looper
 import cellprofiler.measurements as cpmeas
 
+test_dir = os.path.dirname(os.path.abspath(__file__))
+test_data_dir = os.path.join(test_dir, 'data')
 
 class TestDistributor(unittest.TestCase):
 
@@ -188,8 +190,8 @@ class TestDistributor(unittest.TestCase):
         #print measurement
         self._stop_serving_clean()
 
-    @unittest.skip
-    @unittest.expectedFailure
+    #@unittest.expectedFailure
+    @unittest.skip('lengthy test and expected failure')
     def test_worker_looper(self):
         self._start_serving()
         url = '%s:%s' % (self.address, self.port)
@@ -201,9 +203,6 @@ class TestDistributor(unittest.TestCase):
         self._start_serving()
         url = '%s:%s' % (self.address, self.port)
 
-        test_dir = os.path.dirname(os.path.abspath(__file__))
-        test_data_dir = os.path.join(test_dir, 'data')
-
         meas_file = os.path.join(test_data_dir, 'Cpmeasurementsam6C7Z.hdf5')
         curr_meas = cpmeas.load_measurements(filename=meas_file)
         transit = JobTransit(url)
@@ -214,21 +213,25 @@ class TestDistributor(unittest.TestCase):
         self.assertTrue('mismatched pipeline hash' in response['code'])
         self._stop_serving_clean()
 
-    @unittest.skip
-    @unittest.expectedFailure
-    def test_results(self):
+    #@unittest.expectedFailure
+    @unittest.skip('lengthy test and expected failure')
+    def test_wound_healing(self):
         self._start_serving()
         url = '%s:%s' % (self.address, self.port)
         responses = worker_looper(url)
-
+        expected_meas_fi = os.path.join(test_data_dir, 'WoundHealingResults.h5')
+        act_meas_fi = self.output_file
+        exp_meas = cpmeas.load(filename=expected_meas_fi)
+        act_meas = cpmeas.load(filename=act_meas_fi)
+        from cellprofiler.tests.test_Measurements import tst_compare_measurements
+        tst_compare_measurements(exp_meas, act_meas)
 
 def suite():
-    unittest.main()
-    #suite = unittest.TestSuite()
-    #suite.addTest(TestDistributor('test_worker_looper'))
-    #return suite
+    suite = unittest.TestSuite()
+    suite.addTest(TestDistributor('test_worker_looper'))
+    return suite
 
 if __name__ == "__main__":
-    #unittest.main()
+    unittest.main()
     #suite = suite()
-    unittest.TextTestRunner(verbosity=2).run(suite())
+    #unittest.TextTestRunner(verbosity=2).run(suite())
