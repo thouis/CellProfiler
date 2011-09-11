@@ -89,9 +89,9 @@ class HDF5Dict(object):
 
     If the 'must_exist' flag is set, it is an error to add a new
     object or feature that does not exist.
-    
+
     The measurements data is stored in groups corresponding to object names
-    (with special objects, "Image" = image set measurements and "Experiment" = 
+    (with special objects, "Image" = image set measurements and "Experiment" =
     experiment measurements. Each object feature has its own group under
     the object group. The feature group has two data sets. The first data set
     is "index" and holds indexes into the second data set whose name is "data".
@@ -104,21 +104,22 @@ class HDF5Dict(object):
 
     # XXX - document how data is stored in hdf5 (basically, /Measurements/Object/Feature)
 
-    def __init__(self, hdf5_filename, 
-                 top_level_group_name = "Measurements",
-                 run_group_name = time.strftime("%Y-%m-%d-%H-%m-%S"),
-                 is_temporary = False,
-                 copy = None):
+    def __init__(self, hdf5_filename,
+                 top_level_group_name="Measurements",
+                 run_group_name=time.strftime("%Y-%m-%d-%H-%m-%S"),
+                 is_temporary=False,
+                 copy=None):
         self.is_temporary = is_temporary
         self.filename = hdf5_filename
         # assert not os.path.exists(self.filename)  # currently, don't allow overwrite
         self.hdf5_file = h5py.File(self.filename, 'w')
         vdataset = self.hdf5_file.create_dataset(
-            VERSION, data = np.array([version_number], int))
+            VERSION, data=np.array([version_number], int))
         self.top_level_group_name = top_level_group_name
         mgroup = self.hdf5_file.create_group(top_level_group_name)
         self.top_group = mgroup.create_group(run_group_name)
         self.indices = {}  # nested indices for data slices, indexed by (object, feature) then by numerical index
+
         class HDF5Lock:
             def __init__(self):
                 self.lock = threading.RLock()
@@ -126,14 +127,14 @@ class HDF5Dict(object):
                 self.lock.acquire()
                 if hasattr(h5py.highlevel, "phil"):
                     h5py.highlevel.phil.acquire()
-                
+
             def __exit__(self, t, v, tb):
                 if hasattr(h5py.highlevel, "phil"):
                     h5py.highlevel.phil.release()
                 self.lock.release()
-                
+
         self.lock = HDF5Lock()
-                
+
         self.must_exist = False
         self.chunksize = 1024
         if copy is not None:
@@ -145,6 +146,11 @@ class HDF5Dict(object):
                     hdf5_index = object_group[feature_name]['index']
                     for num_idx, start, stop in hdf5_index:
                         d[num_idx] = slice(start, stop)
+
+    def __check_valid_index(self, idxs):
+        assert isinstance(idxs, tuple), "Accessing HDF5_Dict requires a tuple of (object_name, feature_name, integer)"
+        assert isinstance(idxs[0], basestring) and isinstance(idxs[1], basestring), "First two indices must be of type str."
+        assert isinstance(idxs[2], int) and idxs[2] >= 0, "Third index must be a non-negative integer"
 
     def __del__(self):
         if not hasattr(self, "hdf5_file"):
@@ -161,11 +167,7 @@ class HDF5Dict(object):
             self.hdf5_file.close()
 
     def __getitem__(self, idxs):
-        assert isinstance(idxs, tuple), "Accessing HDF5_Dict requires a tuple of (object_name, feature_name[, integer])"
-        assert isinstance(idxs[0], basestring) and isinstance(idxs[1], basestring), "First two indices must be of type str."
-        assert ((not np.isscalar(idxs[2]) and np.all(idxs[2] >= 0))
-                or (isinstance(idxs[2], int) and idxs[2] >= 0)),\
-               "Third index must be a non-negative integer or integer array"
+        self.__check_valid_index(idxs)
 
         object_name, feature_name, num_idx = idxs
         feature_exists = self.has_feature(object_name, feature_name)
@@ -174,10 +176,10 @@ class HDF5Dict(object):
             with self.lock:
                 indices = self.indices[(object_name, feature_name)]
                 dataset = self.get_dataset(object_name, feature_name)
-                return [None if (isinstance(dest, slice) and 
-                                 dest.start is not None and 
+                return [None if (isinstance(dest, slice) and
+                                 dest.start is not None and
                                  dest.start == dest.stop) else dataset[dest]
-                        for dest in [ indices.get(image_number, slice(0,0))
+                        for dest in [indices.get(image_number, slice(0, 0))
                                       for image_number in num_idx]]
 
         if not self.has_data(*idxs):
@@ -195,9 +197,7 @@ class HDF5Dict(object):
             return dataset[dest]
 
     def __setitem__(self, idxs, val):
-        assert isinstance(idxs, tuple), "Assigning to HDF5_Dict requires a tuple of (object_name, feature_name, integer)"
-        assert isinstance(idxs[0], basestring) and isinstance(idxs[1], basestring), "First two indices must be of type str."
-        assert isinstance(idxs[2], int) and idxs[2] >= 0, "Third index must be a non-negative integer"
+        self.__check_valid_index(idxs)
 
         object_name, feature_name, num_idx = idxs
         full_name = '%s.%s' % (idxs[0], idxs[1])
@@ -242,9 +242,7 @@ class HDF5Dict(object):
                 dataset[dest] = np.asanyarray(val).ravel()
 
     def __delitem__(self, idxs):
-        assert isinstance(idxs, tuple), "Accessing HDF5_Dict requires a tuple of (object_name, feature_name, integer)"
-        assert isinstance(idxs[0], basestring) and isinstance(idxs[1], basestring), "First two indices must be of type str."
-        assert isinstance(idxs[2], int) and idxs[2] >= 0, "Third index must be a non-negative integer"
+        self.__check_valid_index(idxs)
 
         object_name, feature_name, num_idx = idxs
         feature_exists = self.has_feature(object_name, feature_name)
@@ -263,7 +261,7 @@ class HDF5Dict(object):
             # reserved value of -1 means deleted
             idx = self.top_group[object_name][feature_name]['index']
             idx[np.flatnonzero(idx[:, 0] == num_idx), 0] = -1
-            
+
     def has_data(self, object_name, feature_name, num_idx):
         return num_idx in self.indices.get((object_name, feature_name), [])
 
@@ -286,7 +284,7 @@ class HDF5Dict(object):
         with self.lock:
             feature_group = self.top_group[object_name].require_group(feature_name)
             self.indices.setdefault((object_name, feature_name), {})
-            
+
     def find_index_or_slice(self, idxs, values=None):
         '''Find the linear indexes or slice for a particular set of
         indexes "idxs", and check that values could be stored in that
@@ -348,7 +346,7 @@ class HDF5Dict(object):
 
     def get_indices(self, object_name, feature_name):
         # CellProfiler expects these in write order
-        if not (self.has_object(object_name) and 
+        if not (self.has_object(object_name) and
                 self.has_feature(object_name, feature_name)):
             return []
         with self.lock:
@@ -366,7 +364,7 @@ class HDF5Dict(object):
         with self.lock:
             return self.top_group[object_name].keys()
 
-def get_top_level_group(filename, group_name = 'Measurements', open_mode='r'):
+def get_top_level_group(filename, group_name='Measurements', open_mode='r'):
     '''Open and return the Measurements HDF5 group
     
     filename - path to HDF5 file
