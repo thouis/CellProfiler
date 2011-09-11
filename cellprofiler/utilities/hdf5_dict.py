@@ -92,13 +92,13 @@ class HDF5Dict(object):
 
     The measurements data is stored in groups corresponding to object names
     (with special objects, "Image" = image set measurements and "Experiment" =
-    experiment measurements. Each object feature has its own group under
+    experiment measurements). Each object feature has its own group under
     the object group. The feature group has two data sets. The first data set
     is "index" and holds indexes into the second data set whose name is "data".
     "index" is an N x 3 integer array where N is the number of image sets
     with this feature measurement and the three row values are the image number
     of that row's measurements, the offset to the first data element for
-    the feature measurement for that image number in the "data" dataset 
+    the feature measurement for that image number in the "data" dataset, 
     and the offset to one past the last data element.
     '''
 
