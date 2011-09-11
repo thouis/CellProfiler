@@ -6,6 +6,8 @@ import hashlib
 import tempfile
 import json
 import urllib2
+import cPickle
+import base64
 
 import logging
 from collections import OrderedDict
@@ -159,7 +161,7 @@ class Distributor(object):
                     response = {'id': job[0], 'num_remaining':self.num_remaining()}
                     response.update(job[1])
             elif((msg['type'] == 'result') and ('result' in msg)):
-                response = self.report_results(msg)
+                response = self.report_result(msg)
             elif((msg['type']) == 'command'):
                 response = self.receive_command(msg)
 
@@ -186,7 +188,7 @@ class Distributor(object):
         return {'path': self.pipeline_path,
                     'pipeline_hash': self.pipeline_blob_hash}
 
-    def report_results(self, msg):
+    def report_result(self, msg):
         jobnum = msg['id']
         pipeline_hash = msg['pipeline_hash']
         work_item = self.work_queue.get(jobnum, None)
@@ -196,25 +198,19 @@ class Distributor(object):
             print resp
             response['code'] = resp
         elif(pipeline_hash != work_item):
-            # out of date result?
-            resp = "ignored mismatched pipeline hash", pipeline_hash, work_item
+            resp = "mismatched pipeline hash"
             response['code'] = resp
         else:
             #Read data, write to temp file, load into HDF5_dict instance
-            raw_dat = msg['measurements']
-            meas_str = zlib.decompress(raw_dat)
-
+            raw_dat = msg['result']
+            meas_str = base64.decode(zlib.decompress(raw_dat))
             temp_hdf5 = tempfile.NamedTemporaryFile(dir=os.path.dirname(self.output_file))
             temp_hdf5.write(meas_str)
             temp_hdf5.flush()
-
             curr_meas = cpmeas.load_measurements(filename=temp_hdf5.name)
+
             self.measurements.combine_measurements(curr_meas, can_overwrite=True)
             del curr_meas
-
-            #This can potentially cause a race condition,
-            #so make sure report_results is called on the same thread/process
-            #as the server.
             del self.work_queue[jobnum]
             self.jobs_finished += 1
             response = {'status': 'success', 'num_remaining': self.num_remaining()}
@@ -314,15 +310,18 @@ class JobTransit(object):
             logger.debug('KeyError: %s' % exc)
             return None
 
-    def report_measurements(self, measurements):
+    def report_measurements(self, jobinfo, measurements):
         meas_file = open(measurements.hdf5_dict.filename, 'r+b')
-        out_measurements = meas_file.read()
+        meas_str = meas_file.read()
+        send_str = base64.b64encode(zlib.compress(meas_str))
 
-        msg = {'type': 'result', 'result': out_measurements}
+        msg = {'type': 'result', 'result': send_str}
+        msg.update(jobinfo.get_dict())
         raw_msg = json.dumps(msg)
+
         self.socket.send(raw_msg)
         resp = self.socket.recv()
-        return self._parse_response(resp)
+        return parse_json(resp)
 
 class JobInfo(object):
     def __init__(self, image_set_start, image_set_end,
@@ -335,6 +334,10 @@ class JobInfo(object):
         self.job_num = job_num
         self.is_valid = is_valid
         self.num_remaining = num_remaining
+
+    def get_dict(self):
+        return {'id': self.job_num,
+                'pipeline_hash': self.pipeline_hash}
 
     def pipeline_stringio(self):
         return StringIO.StringIO(zlib.decompress(self.pipeline_blob))
