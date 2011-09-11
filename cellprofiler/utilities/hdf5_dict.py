@@ -148,9 +148,11 @@ class HDF5Dict(object):
                         d[num_idx] = slice(start, stop)
 
     def __check_valid_index(self, idxs):
-        assert isinstance(idxs, tuple), "Accessing HDF5_Dict requires a tuple of (object_name, feature_name, integer)"
+        assert isinstance(idxs, tuple), "Accessing HDF5_Dict requires a tuple of (object_name, feature_name[, integer])"
         assert isinstance(idxs[0], basestring) and isinstance(idxs[1], basestring), "First two indices must be of type str."
-        assert isinstance(idxs[2], int) and idxs[2] >= 0, "Third index must be a non-negative integer"
+        assert ((not np.isscalar(idxs[2]) and np.all(idxs[2] >= 0))
+                or (isinstance(idxs[2], int) and idxs[2] >= 0)), \
+               "Third index must be a non-negative integer or integer array"
 
     def __del__(self):
         if not hasattr(self, "hdf5_file"):
