@@ -76,7 +76,7 @@ COLTYPE_VARCHAR_FILE_NAME = COLTYPE_VARCHAR_FORMAT % FILE_NAME_LENGTH
 COLTYPE_VARCHAR_PATH_NAME = COLTYPE_VARCHAR_FORMAT % PATH_NAME_LENGTH
 
 '''Column attribute: only available after post_group is run (True / False)'''
-MCA_AVAILABLE_POST_GROUP  = "AvailablePostGroup"
+MCA_AVAILABLE_POST_GROUP = "AvailablePostGroup"
 
 '''The name of the metadata category'''
 C_METADATA = "Metadata"
@@ -119,8 +119,8 @@ class Measurements(object):
     def __init__(self,
                  can_overwrite=False,
                  image_set_start=None,
-                 filename = None,
-                 copy = None):
+                 filename=None,
+                 copy=None):
         """Create a new measurements collection
 
         can_overwrite - DEPRECATED and has no effect
@@ -142,16 +142,16 @@ class Measurements(object):
         if isinstance(copy, Measurements):
             with copy.hdf5_dict.lock:
                 self.hdf5_dict = HDF5Dict(
-                    filename, 
-                    is_temporary = is_temporary,
-                    copy = copy.hdf5_dict.top_group)
+                    filename,
+                    is_temporary=is_temporary,
+                    copy=copy.hdf5_dict.top_group)
         elif hasattr(copy, '__getitem__') and hasattr(copy, 'keys'):
             self.hdf5_dict = HDF5Dict(
                 filename,
-                is_temporary = is_temporary,
-                copy = copy)
+                is_temporary=is_temporary,
+                copy=copy)
         else:
-            self.hdf5_dict = HDF5Dict(filename, is_temporary = is_temporary)
+            self.hdf5_dict = HDF5Dict(filename, is_temporary=is_temporary)
         if is_temporary:
             os.close(fd)
 
@@ -162,11 +162,11 @@ class Measurements(object):
         self.__initialized_explicitly = False
         self.__relationships = set()
         self.__relationship_names = set()
-        
+
     def __del__(self):
         if hasattr(self, "hdf5_dict"):
             del self.hdf5_dict
-        
+
     def initialize(self, measurement_columns):
         '''Initialize the measurements with a list of objects and features
 
@@ -253,7 +253,7 @@ class Measurements(object):
             omeas = m[object_name][0, 0]
             for feature_name in omeas.dtype.fields.keys():
                 if object_name == IMAGE:
-                    values = [None if len(x) == 0 else x.flatten()[0] 
+                    values = [None if len(x) == 0 else x.flatten()[0]
                               for x in omeas[feature_name][0]]
                 elif object_name == EXPERIMENT:
                     value = omeas[feature_name][0, 0].flatten()[0]
@@ -270,7 +270,7 @@ class Measurements(object):
         #
         self.image_set_number = self.image_set_count + 1
 
-    def add_image_measurement(self, feature_name, data, can_overwrite = False):
+    def add_image_measurement(self, feature_name, data, can_overwrite=False):
         """Add a measurement to the "Image" category
 
         """
@@ -300,7 +300,7 @@ class Measurements(object):
         self.add_image_measurement(GROUP_INDEX, group_index)
 
     group_index = property(get_group_index, set_group_index)
-    
+
     def get_groupings(self, features):
         '''Return groupings of image sets based on feature values
         
@@ -328,7 +328,7 @@ class Measurements(object):
                 d[key] = []
             d[key].append(image_number)
         return [ (dict(k), d[k]) for k in sorted(d.keys()) ]
-            
+
 
     def add_relate_measurement(
         self, module_number,
@@ -415,7 +415,7 @@ class Measurements(object):
             temp['object_number2'] = grp['object_number2']
             return temp.view(np.recarray)
 
-    def add_measurement(self, object_name, feature_name, data, 
+    def add_measurement(self, object_name, feature_name, data,
                         can_overwrite=False, image_set_number=None):
         """Add a measurement or, for objects, an array of measurements to the set
 
@@ -457,7 +457,7 @@ class Measurements(object):
             if not self.hdf5_dict.has_data(object_name, 'ObjectNumber', image_set_number):
                 self.hdf5_dict[object_name, 'ImageNumber', image_set_number] = [image_set_number] * len(data)
                 self.hdf5_dict[object_name, 'ObjectNumber', image_set_number] = np.arange(1, len(data) + 1)
-                
+
     def remove_measurement(self, object_name, feature_name, image_number):
         '''Remove the measurement for the given image number
         
@@ -479,7 +479,7 @@ class Measurements(object):
         """The list of feature names (measurements) for an object
         """
         return [name for name in self.hdf5_dict.second_level_names(object_name) if name not in ('ImageNumber', 'ObjectNumber')]
-    
+
     def get_image_numbers(self):
         '''Return the image numbers from the Image table'''
         image_numbers = np.array(
@@ -566,8 +566,36 @@ class Measurements(object):
                 if self.hdf5_dict.has_feature(object_name, feature_name):
                     del self.hdf5_dict[object_name, feature_name, idx + 1]
             else:
-                self.add_measurement(object_name, feature_name, val, 
+                self.add_measurement(object_name, feature_name, val,
                                      image_set_number=idx + 1)
+    def combine_measurements(self, measurements, can_overwrite=False):
+        """
+        Add the measurements in 'measurements' object to this one.
+        All restrictions enforced in add_measurement on over-writing data, 
+        or adding new data where none existed,
+        are enforced here. 'Experiment' measurements written if they don't 
+        already exist, but never overwritten
+        """
+
+        assert isinstance(measurements, Measurements)
+        obj_names = measurements.get_object_names()
+
+        for obj_name in obj_names:
+            if obj_name == EXPERIMENT:
+                obj_overwrite = False
+            else:
+                obj_overwrite = True and can_overwrite
+            feature_names = measurements.get_feature_names(obj_name)
+            image_numbers = measurements.get_image_numbers()
+
+            for feat_name in feature_names:
+                if(self.has_feature(obj_name, feat_name) and not obj_overwrite):
+                    continue
+                for img_num in image_numbers:
+                    dat = measurements.get_measurement(obj_name, feat_name, img_num)
+                    self.add_measurement(obj_name, feat_name, dat,
+                                         can_overwrite=can_overwrite,
+                                         image_set_number=img_num)
 
     def get_experiment_measurement(self, feature_name):
         """Retrieve an experiment-wide measurement
@@ -642,7 +670,7 @@ class Measurements(object):
             tag_dictionary = dict(row)
             result.append(MetadataGroup(tag_dictionary, flat_dictionary[row]))
         return result
-    
+
     def match_metadata(self, features, values):
         '''Match vectors of metadata values to existing measurements
         
@@ -674,10 +702,10 @@ class Measurements(object):
         # to them, either by order or by common metadata
         #
         image_set_count = len(self.get_image_numbers())
-        by_order = [[i+1] for i in range(len(values[0]))]
+        by_order = [[i + 1] for i in range(len(values[0]))]
         if image_set_count == 0:
             return by_order
-        
+
         image_features = self.get_feature_names(IMAGE)
         metadata_features = [x for x in image_features
                              if x.startswith(C_METADATA + "_")]
@@ -696,10 +724,10 @@ class Measurements(object):
             if x.isdigit():
                 return int(x)
             return x
-        
-        common_tags = [f[(len(C_METADATA)+1):] for f in common_features]
+
+        common_tags = [f[(len(C_METADATA) + 1):] for f in common_features]
         groupings = self.group_by_metadata(common_tags)
-        groupings = dict([(tuple([cast(d[f]) for f in common_tags]), 
+        groupings = dict([(tuple([cast(d[f]) for f in common_tags]),
                            d.image_numbers)
                           for d in groupings])
         if image_set_count == len(values[0]):
@@ -724,10 +752,10 @@ class Measurements(object):
                     "There was no image set whose metadata matched row %d.\n"
                     "Metadata values: " +
                     ", ".join(["%s = %s" % (k, v)
-                               for k,v in zip(common_features, key)]))
+                               for k, v in zip(common_features, key)]))
             result.append(groupings[key])
         return result
-        
+
     def agg_ignore_object(self, object_name):
         """Ignore objects (other than 'Image') if this returns true"""
         if object_name in (EXPERIMENT, NEIGHBORS):
@@ -780,9 +808,9 @@ class Measurements(object):
                     stdev = values.std() if values is not None else np.NaN
                     d[stdev_feature_name] = stdev
         return d
-    
-def load_measurements(filename, dest_file = None, can_overwrite = False,
-                      run_name = None):
+
+def load_measurements(filename, dest_file=None, can_overwrite=False,
+                      run_name=None):
     '''Load measurements from an HDF5 file
     
     filename - path to file containing the measurements or file-like object
@@ -809,7 +837,7 @@ def load_measurements(filename, dest_file = None, can_overwrite = False,
         fd = open(filename, "rb")
         header = fd.read(len(HDF5_HEADER))
         fd.close()
-    
+
     if header == HDF5_HEADER:
         f, top_level = get_top_level_group(filename)
         try:
@@ -820,12 +848,12 @@ def load_measurements(filename, dest_file = None, can_overwrite = False,
                     # Assume that the user wants the last one
                     last_key = sorted(top_level.keys())[-1]
                     top_level = top_level[last_key]
-            m = Measurements(filename=dest_file, copy = top_level)
+            m = Measurements(filename=dest_file, copy=top_level)
             return m
         finally:
             f.close()
     else:
-        m = Measurements(filename = dest_file)
+        m = Measurements(filename=dest_file)
         m.load(filename)
         return m
 
