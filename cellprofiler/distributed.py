@@ -191,7 +191,7 @@ class Distributor(object):
         jobnum = msg['id']
         pipeline_hash = msg['pipeline_hash']
         work_item = self.work_queue.get(jobnum, None)
-        print work_item
+        #print work_item
         response = {'status': 'failure'}
         if(work_item is None):
             resp = 'work item %s not found' % (jobnum)
@@ -203,7 +203,7 @@ class Distributor(object):
         else:
             #Read data, write to temp file, load into HDF5_dict instance
             raw_dat = msg['result']
-            meas_str = zlib.decompress(base64.b64decode(raw_dat))
+            meas_str = base64.b64decode(raw_dat)
             temp_dir = os.path.dirname(self.output_file)
             temp_hdf5 = tempfile.NamedTemporaryFile(dir=temp_dir)
             temp_hdf5.write(meas_str)
@@ -317,7 +317,10 @@ class JobTransit(object):
     def report_measurements(self, jobinfo, measurements):
         meas_file = open(measurements.hdf5_dict.filename, 'r+b')
         meas_str = meas_file.read()
-        send_str = base64.b64encode(zlib.compress(meas_str))
+        start = time.clock()
+        send_str = base64.b64encode(meas_str)
+        elapsed = time.clock() - start
+        print '%2.5e sec to encode string of length %s' % (elapsed, len(meas_str))
 
         msg = {'type': 'result', 'result': send_str}
         msg.update(jobinfo.get_dict())

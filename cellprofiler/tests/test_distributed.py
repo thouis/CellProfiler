@@ -228,10 +228,9 @@ class TestDistributor(unittest.TestCase):
 
 def suite():
     suite = unittest.TestSuite()
-    suite.addTest(TestDistributor('test_worker_looper'))
+    suite.addTest(TestDistributor('test_report_measurements'))
     return suite
 
 if __name__ == "__main__":
-    unittest.main()
-    #suite = suite()
-    #unittest.TextTestRunner(verbosity=2).run(suite())
+    #unittest.main()
+    unittest.TextTestRunner(verbosity=2).run(suite())
