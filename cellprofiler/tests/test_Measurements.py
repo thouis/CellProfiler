@@ -585,17 +585,18 @@ class TestMeasurements(unittest.TestCase):
                 del m
             os.unlink(name)
 
-    @unittest.expectedFailure
-    def test_14_01_combine(self):
+    def tst_combine(self, img_nums_1, img_nums_2):
+        """
+        Test combining features of 2 different image sets,
+        with sequential image numbers
+        """
         obj_nums = xrange(0, 2)
-        fet_nums = xrange(0, 3)
-        img_nums_1 = xrange(1, 5)
-        img_nums_2 = xrange(5, 8)
-        all_img_nums = xrange(min(img_nums_1), max(img_nums_2))
+        feat_nums = xrange(0, 3)
+        all_img_nums = set(img_nums_1) | set(img_nums_2)
 
         mknums = lambda pre, post: ['%s_%s' % (pre, pst) for pst in post]
         obj_names = [cpmeas.EXPERIMENT, cpmeas.IMAGE, cpmeas.OBJECT]
-        fet_names = mknums('Feat', fet_nums)
+        feat_names = mknums('Feat', feat_nums)
 
         r = np.random.RandomState()
         r.seed(3)
@@ -605,7 +606,7 @@ class TestMeasurements(unittest.TestCase):
         ideal_comb = cpmeas.Measurements()
 
         for obj_name in obj_names:
-            for feat_name in fet_names:
+            for feat_name in feat_names:
                 if(obj_name == cpmeas.EXPERIMENT):
                     img_nums = [0]
                 else:
@@ -616,7 +617,6 @@ class TestMeasurements(unittest.TestCase):
                     ideal_comb.add_measurement(obj_name, feat_name, data,
                                                can_overwrite=False,
                                                image_set_number=img_num)
-
                     subsets = None
                     if img_num in img_nums_1:
                         subsets = [set1]
@@ -634,11 +634,42 @@ class TestMeasurements(unittest.TestCase):
         set1.combine_measurements(set2)
         tst_compare_measurements(ideal_comb, set1)
 
+    def test_14_01_combine(self):
+        """
+        Test combining features of 2 different image sets,
+        with sequential image numbers
+        """
+        img_nums_1 = xrange(1, 5)
+        img_nums_2 = xrange(5, 8)
+        self.tst_combine(img_nums_1, img_nums_2)
+
+
+    def test_14_02_combine(self):
+        """
+        Combine measurements with non-sequential image numbers
+        """
+        img_nums_1 = [1, 4, 6, 9]
+        img_nums_2 = [2, 3, 5, 7, 8]
+        self.tst_combine(img_nums_1, img_nums_2)
+
+    def test_14_03_combine(self):
+        """
+        Combine measurements image numbers
+        that do not form a continuous integer sequence
+        """
+        img_nums_1 = [1, 4, 6, 9]
+        img_nums_2 = [3, 7, 8]
+        self.tst_combine(img_nums_1, img_nums_2)
+
+
 def tst_compare_measurements(ideal_meas, act_meas):
     obj_names = ideal_meas.get_object_names()
+    image_numbers = ideal_meas.get_image_numbers()
+    np.testing.assert_equal(sorted(image_numbers), sorted(act_meas.get_image_numbers()))
     for obj_name in obj_names:
         feature_names = ideal_meas.get_feature_names(obj_name)
-        image_numbers = ideal_meas.get_image_numbers()
+        act_feat_names = act_meas.get_feature_names(obj_name)
+        np.testing.assert_equal(sorted(feature_names), sorted(act_feat_names))
 
         for feat_name in feature_names:
             for img_num in image_numbers:
@@ -650,4 +681,7 @@ def tst_compare_measurements(ideal_meas, act_meas):
                                         verbose=True)
 
 if __name__ == "__main__":
+    #sep_comb_suite = unittest.TestSuite()
+    #sep_comb_suite.addTest(TestMeasurements('test_14_01_combine'))
+    #unittest.TextTestRunner(verbosity=2).run(sep_comb_suite)
     unittest.main()
