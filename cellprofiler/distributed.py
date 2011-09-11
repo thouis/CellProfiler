@@ -63,13 +63,11 @@ class Distributor(object):
         # duplicate pipeline
         pipeline = pipeline.copy()
 
-
         # make sure createbatchfiles is not in the pipeline
         exclude_mods = ['createbatchfiles', 'exporttospreadsheet']
         for ind, mod in enumerate(pipeline.modules()):
             if(mod.module_name.lower() in exclude_mods):
-                print '%s cannot be included in distributed mode, removing' % \
-                    (mod)
+                print '%s cannot be used in distributed mode, removing' % (mod)
                 pipeline.remove_module(ind + 1)
 
         # create the image list
@@ -80,9 +78,9 @@ class Distributor(object):
                                   self.measurements, image_set_list)
 
         if not pipeline.prepare_run(workspace):
-            raise RuntimeError('Could not create image set list for distributed processing.')
+            raise RuntimeError('Could not create image set list.')
 
-        # call prepare_to_create_batch, for whatever preparation may be necessary
+        # call prepare_to_create_batch, for whatever preparation is necessary
         # hopefully none
         #pipeline.prepare_to_create_batch(workspace, lambda s: s)
 
@@ -158,7 +156,8 @@ class Distributor(object):
                     response = {'status': 'nowork'}
                 else:
                     #job = [key,value]. value is a dict of the properties
-                    response = {'id': job[0], 'num_remaining':self.num_remaining()}
+                    response = {'id': job[0],
+                                'num_remaining': self.num_remaining()}
                     response.update(job[1])
             elif((msg['type'] == 'result') and ('result' in msg)):
                 response = self.report_result(msg)
@@ -192,28 +191,32 @@ class Distributor(object):
         jobnum = msg['id']
         pipeline_hash = msg['pipeline_hash']
         work_item = self.work_queue.get(jobnum, None)
+        print work_item
         response = {'status': 'failure'}
         if(work_item is None):
             resp = 'work item %s not found' % (jobnum)
             print resp
             response['code'] = resp
-        elif(pipeline_hash != work_item):
+        elif(pipeline_hash != work_item['pipeline_hash']):
             resp = "mismatched pipeline hash"
             response['code'] = resp
         else:
             #Read data, write to temp file, load into HDF5_dict instance
             raw_dat = msg['result']
-            meas_str = base64.decode(zlib.decompress(raw_dat))
-            temp_hdf5 = tempfile.NamedTemporaryFile(dir=os.path.dirname(self.output_file))
+            meas_str = zlib.decompress(base64.b64decode(raw_dat))
+            temp_dir = os.path.dirname(self.output_file)
+            temp_hdf5 = tempfile.NamedTemporaryFile(dir=temp_dir)
             temp_hdf5.write(meas_str)
             temp_hdf5.flush()
             curr_meas = cpmeas.load_measurements(filename=temp_hdf5.name)
 
-            self.measurements.combine_measurements(curr_meas, can_overwrite=True)
+            self.measurements.combine_measurements(curr_meas,
+                                                   can_overwrite=True)
             del curr_meas
             del self.work_queue[jobnum]
             self.jobs_finished += 1
-            response = {'status': 'success', 'num_remaining': self.num_remaining()}
+            response = {'status': 'success',
+                        'num_remaining': self.num_remaining()}
         return response
 
     def receive_command(self, msg):
@@ -299,12 +302,13 @@ class JobTransit(object):
             job_num = msg['id']
             pipeline_hash_rem = msg['pipeline_hash']
             image_num = int(job_num)
-            jobinfo = JobInfo(image_num, image_num, pipeline_blob, pipeline_hash_local, job_num)
+            jobinfo = JobInfo(image_num, image_num,
+                              pipeline_blob, pipeline_hash_local, job_num)
             jobinfo.num_remaining = msg['num_remaining']
 
             jobinfo.is_valid = pipeline_hash_local == pipeline_hash_rem
             if(not jobinfo.is_valid):
-                logger.info("Mismatched hash, probably out of sync with server")
+                logger.info("Mismatched pipeline hash")
             return jobinfo
         except KeyError, exc:
             logger.debug('KeyError: %s' % exc)
