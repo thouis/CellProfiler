@@ -124,8 +124,8 @@ class Measurements(object):
         """Create a new measurements collection
 
         can_overwrite - DEPRECATED and has no effect
-        image_set_start - the index of the first image set in the image set list
-                          or None to start at the beginning
+        image_set_start - the index of the first image set in the 
+            image set list or None to start at the beginning
         filename - store the measurement in an HDF5 file with this name
         copy - initialize by copying measurements from here, either an HDF5Dict
                or an H5py group or file.
@@ -303,11 +303,11 @@ class Measurements(object):
 
     def get_groupings(self, features):
         '''Return groupings of image sets based on feature values
-        
+
         features - a sequence of feature names
-                   
+
         returns groupings suitable for return from CPModule.get_groupings.
-        
+
         group_list - a sequence composed of two-tuples.
                      the first element of the tuple is a dictionary giving
                      the metadata values for the metadata keys
@@ -324,11 +324,10 @@ class Measurements(object):
                   for feature in features]
         for i, image_number in enumerate(image_numbers):
             key = tuple([(k, v[i]) for k, v in zip(features, values)])
-            if not d.has_key(key):
+            if key not in d:
                 d[key] = []
             d[key].append(image_number)
         return [ (dict(k), d[k]) for k in sorted(d.keys()) ]
-
 
     def add_relate_measurement(
         self, module_number,
@@ -365,7 +364,9 @@ class Measurements(object):
         group_number = self.group_number
         with self.hdf5_dict.lock:
             self.hdf5_dict.top_group.require_group(RELATIONSHIP)
-            relationship_group = self.hdf5_dict.top_group.require_group('%s/%02d_%d_%s_%s_%s' % (RELATIONSHIP, module_number, group_number, relationship, object_name1, object_name2))
+            relationship_group = self.hdf5_dict.top_group.require_group(
+                                '%s/%02d_%d_%s_%s_%s' % (RELATIONSHIP, module_number,
+                                group_number, relationship, object_name1, object_name2))
             features = ["group_number", "group_index1", "group_index2", "object_number1", "object_number2"]
             if "group_number" not in relationship_group:
                 for name in features:
@@ -436,20 +437,19 @@ class Measurements(object):
                 return unicode(v).encode('unicode_escape')
             return v
 
+        index = image_set_number
         if object_name == EXPERIMENT:
-            if not np.isscalar(data) and data is not None:
-                data = data[0]
-            if data is None:
-                data = []
-            self.hdf5_dict[EXPERIMENT, feature_name, 0] = wrap_string(data)
-        elif object_name == IMAGE:
-            if not np.isscalar(data) and data is not None:
-                data = data[0]
-            if data is None:
-                data = []
-            self.hdf5_dict[IMAGE, feature_name, image_set_number] = wrap_string(data)
-            if not self.hdf5_dict.has_data(object_name, 'ImageNumber', image_set_number):
+            index = 0
+
+        if object_name == IMAGE and not self.hdf5_dict.has_data(object_name, 'ImageNumber', image_set_number):
                 self.hdf5_dict[IMAGE, 'ImageNumber', image_set_number] = image_set_number
+
+        if object_name == EXPERIMENT or object_name == IMAGE:
+            if not np.isscalar(data) and data is not None and len(data) > 0:
+                data = data[0]
+            if data is None:
+                data = []
+            self.hdf5_dict[object_name, feature_name, index] = wrap_string(data)
         else:
             self.hdf5_dict[object_name, feature_name, image_set_number] = data
             if not self.hdf5_dict.has_data(IMAGE, IMAGE_NUMBER, image_set_number):
@@ -487,6 +487,10 @@ class Measurements(object):
         image_numbers.sort()
         return image_numbers
 
+    def get_image_count(self):
+        image_numbers = self.get_image_numbers()
+        return len(image_numbers)
+
     def has_feature(self, object_name, feature_name):
         return self.hdf5_dict.has_feature(object_name, feature_name)
 
@@ -509,9 +513,9 @@ class Measurements(object):
         
         object_name - the name of one of the objects or one of the generic
                       names such as Image or Experiment
-                      
-        feature_name - the name of the feature to retrieve 
-        
+
+        feature_name - the name of the feature to retrieve
+
         image_set_number - the current image set by default, a single 
                            image set number to get measurements for one
                            image set or a sequence of image numbers to
@@ -523,10 +527,19 @@ class Measurements(object):
             if isinstance(v, str):
                 return unicode(str(v)).decode('unicode_escape')
             return v
+
+        def helper(data):
+            if len(data) > 0:
+                return data[0]
+            else:
+                return np.array([])
+
         if object_name == EXPERIMENT:
-            return unwrap_string(self.hdf5_dict[EXPERIMENT, feature_name, 0][0])
+            return unwrap_string(helper(self.hdf5_dict[EXPERIMENT, feature_name, 0]))
+
         if image_set_number is None:
             image_set_number = self.image_set_number
+
         vals = self.hdf5_dict[object_name, feature_name, image_set_number]
         if vals is None:
             return None
@@ -568,13 +581,12 @@ class Measurements(object):
             else:
                 self.add_measurement(object_name, feature_name, val,
                                      image_set_number=idx + 1)
+
     def combine_measurements(self, measurements, can_overwrite=False):
         """
         Add the measurements in 'measurements' object to this one.
-        All restrictions enforced in add_measurement on over-writing data, 
-        or adding new data where none existed,
-        are enforced here. 'Experiment' measurements written if they don't 
-        already exist, but never overwritten
+        All restrictions enforced in add_measurement on over-writing data, or adding new data where none existed,
+        are enforced here. 'Experiment' measurements written if they don't already exist, but never overwritten
         """
 
         assert isinstance(measurements, Measurements)
