@@ -58,16 +58,17 @@ class Distributor(object):
             return
 
         self.output_file = output_file
-
-        # make sure createbatchfiles is not in the pipeline
-        mod_names = [mod.module_name for mod in pipeline.modules()]
-        if 'CreateBatchFiles' in mod_names:
-            # XXX - should offer to ignore?
-            raise RuntimeError('CreateBatchFiles should not '
-                'be used with distributed processing.')
-
         # duplicate pipeline
         pipeline = pipeline.copy()
+
+
+        # make sure createbatchfiles is not in the pipeline
+        exclude_mods = ['createbatchfiles', 'exporttospreadsheet']
+        for ind, mod in enumerate(pipeline.modules()):
+            if(mod.module_name.lower() in exclude_mods):
+                print '%s cannot be included in distributed mode, removing' % \
+                    (mod)
+                pipeline.remove_module(ind + 1)
 
         # create the image list
         image_set_list = cpi.ImageSetList()
@@ -216,7 +217,7 @@ class Distributor(object):
             #as the server.
             del self.work_queue[jobnum]
             self.jobs_finished += 1
-            response = {'status': 'success', 'remaining': len(self.work_queue)}
+            response = {'status': 'success', 'num_remaining': self.num_remaining()}
         return response
 
     def receive_command(self, msg):
@@ -284,7 +285,7 @@ class JobTransit(object):
         return urllib2.urlopen(pipeline_path).read()
 
     def fetch_job(self):
-        tracker = self.socket.send(json.dumps({'type': 'next_job'}), copy=True, track=True)
+        self.socket.send(json.dumps({'type': 'next_job'}))
         raw_msg = self.socket.recv()
         msg = parse_json(raw_msg)
         if(not msg):
@@ -313,7 +314,7 @@ class JobTransit(object):
             logger.debug('KeyError: %s' % exc)
             return None
 
-    def report_measurements(self, pipeline, measurements):
+    def report_measurements(self, measurements):
         meas_file = open(measurements.hdf5_dict.filename, 'r+b')
         out_measurements = meas_file.read()
 
