@@ -10,6 +10,7 @@ from cellprofiler.modules.tests import example_images_directory
 from cellprofiler.pipeline import Pipeline
 from cellprofiler.distributed import Distributor, parse_json, JobTransit
 import cellprofiler.preferences as cpprefs
+from cellprofiler.multiprocess import single_job, worker_looper
 
 
 class TestDistributor(unittest.TestCase):
@@ -51,21 +52,10 @@ class TestDistributor(unittest.TestCase):
 
         cpprefs.set_default_image_directory(self.old_image_dir)
 
-    def _start_serving_getport(self):
-        self.distributor.prepare_queue(self.pipeline, self.output_file)
-        context, socket = self.distributor.prepare_socket(self.address, self.port)
-        self.port = self.distributor.url.split(':')[-1]
-        self.address = self.distributor.url[0:-len(self.port) - 1]
-
-        args = (context, socket)
-        server_proc = Process(target=self.distributor.run, args=args)
-        return server_proc
-
     def _start_serving(self, port=None):
         if(port is None):
             port = self.port
         args = (self.pipeline, self.output_file, self.address, port)
-
         server_proc = Process(target=self.distributor.start_serving, args=args)
         server_proc.start()
         self.procs.append(server_proc)
@@ -78,7 +68,7 @@ class TestDistributor(unittest.TestCase):
         client.connect('%s:%s' % (self.address, self.port))
         client.send(json.dumps(stop_message), copy=False, track=True)
 
-    def tst_start_serving(self):
+    def test_start_serving(self):
         """
         Very basic test. Start server,
         make sure nothing goes wrong.
@@ -90,7 +80,7 @@ class TestDistributor(unittest.TestCase):
         #Server will loop forever unless it hits an error
         self.assertTrue(server_proc.is_alive())
 
-    def tst_stop_serving(self):
+    def test_stop_serving(self):
         stop_message = {'type': 'command',
                         'command':'stop'}
 
@@ -118,7 +108,7 @@ class TestDistributor(unittest.TestCase):
         time.sleep(1)
         self.assertFalse(server_proc.is_alive())
 
-    def tst_get_work_01(self):
+    def test_get_work_01(self):
         """
         Prepare a queue of work.
         Keep getting work but don't report results,
@@ -185,3 +175,20 @@ class TestDistributor(unittest.TestCase):
         expected = set(xrange(1, num_jobs + 1))
         self.assertTrue(expected, received)
 
+    def test_single_job(self):
+        self._start_serving()
+
+        url = '%s:%s' % (self.address, self.port)
+        transit = JobTransit(url)
+        jobinfo = transit.fetch_job()
+        measurement = single_job(jobinfo)
+
+def suite():
+    suite = unittest.TestSuite()
+    suite.addTest(TestDistributor('test_single_job'))
+    return suite
+
+if __name__ == "__main__":
+    #unittest.main()
+    #suite = suite()
+    unittest.TextTestRunner(verbosity=2).run(suite())
