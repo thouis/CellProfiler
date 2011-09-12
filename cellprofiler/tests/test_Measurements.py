@@ -632,7 +632,7 @@ class TestMeasurements(unittest.TestCase):
 
         #Combine subsets and compare to overall measurements set
         set1.combine_measurements(set2)
-        tst_compare_measurements(ideal_comb, set1)
+        compare_measurements(ideal_comb, set1)
 
     def test_14_01_combine(self):
         """
@@ -662,7 +662,7 @@ class TestMeasurements(unittest.TestCase):
         self.tst_combine(img_nums_1, img_nums_2)
 
 
-def tst_compare_measurements(ideal_meas, act_meas):
+def compare_measurements(ideal_meas, act_meas):
     obj_names = ideal_meas.get_object_names()
     image_numbers = ideal_meas.get_image_numbers()
     np.testing.assert_equal(sorted(image_numbers), sorted(act_meas.get_image_numbers()))
