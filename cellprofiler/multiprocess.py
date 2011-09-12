@@ -30,10 +30,11 @@ def worker_looper(url):
             measurements = single_job(jobinfo)
             response = transit.report_measurements(jobinfo, measurements)
             responses.append(response)
-            print response
+            num_remaining = response['num_remaining']
+            has_work = num_remaining > 0
         else:
             has_work = False
-    return response
+    return responses
 
 def single_job(jobinfo):
         pipeline = Pipeline()
