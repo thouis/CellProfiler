@@ -681,6 +681,7 @@ def compare_measurements(ideal_meas_input, act_meas_input, check_feature=lambda 
         ideal_meas = cpmeas.load_measurements(ideal_meas)
     if(isinstance(act_meas, str)):
         act_meas = cpmeas.load_measurements(act_meas)
+    excs = []
 
     obj_names = ideal_meas.get_object_names()
     image_numbers = ideal_meas.get_image_numbers()
@@ -688,7 +689,8 @@ def compare_measurements(ideal_meas_input, act_meas_input, check_feature=lambda 
     for obj_name in obj_names:
         feature_names = ideal_meas.get_feature_names(obj_name)
         act_feat_names = act_meas.get_feature_names(obj_name)
-        np.testing.assert_equal(sorted(feature_names), sorted(act_feat_names))
+        #np.testing.assert_equal(sorted(feature_names), sorted(act_feat_names),
+                                #msg='Different number of feature names')
 
         for feat_name in feature_names:
             if(not check_feature(feat_name)):
@@ -696,10 +698,16 @@ def compare_measurements(ideal_meas_input, act_meas_input, check_feature=lambda 
             for img_num in image_numbers:
                 ideal_dat = ideal_meas.get_measurement(obj_name, feat_name, img_num)
                 act_dat = act_meas.get_measurement(obj_name, feat_name, img_num)
-                np.testing.assert_equal(act_dat, ideal_dat,
+                try:
+                    np.testing.assert_equal(act_dat, ideal_dat,
                                         'Data at %s.%s num %d not equal' % \
                                         (obj_name, feat_name, img_num),
                                         verbose=True)
+                except AssertionError, exc:
+                    excs.append(exc)
+    if(len(excs) > 0):
+        print excs
+        raise excs[0]
 
 if __name__ == "__main__":
     #sep_comb_suite = unittest.TestSuite()
