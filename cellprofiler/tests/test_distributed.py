@@ -43,6 +43,7 @@ class TestDistributor(unittest.TestCase):
         cpprefs.set_default_image_directory(img_dir)
 
         self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.REQ)
         self.procs = []
 
     def tearDown(self):
@@ -52,8 +53,9 @@ class TestDistributor(unittest.TestCase):
 
         self.pipeline = None
         self.distributor = None
-        #This hangs if we haven't closed all the sockets
-        #self.context.term()
+        #context.term hangs if we haven't closed all the sockets
+        self.socket.close()
+        self.context.term()
         for proc in self.procs:
             if(proc.is_alive()):
                 print 'terminating ' + proc.name()
@@ -63,17 +65,15 @@ class TestDistributor(unittest.TestCase):
 
     def _start_serving(self, port=None):
         url = self.distributor.start_serving()
-        return self.distributor.server_proc, url
+        return url
 
     def _stop_serving_clean(self, url=None):
         stop_message = {'type': 'command',
                         'command': 'stop'}
-        client = self.context.socket(zmq.REQ)
         if(url is None):
             url = '%s:%s' % (self.address, self.port)
-        client.connect(url)
-        send_with_timeout(client, json.dumps(stop_message))
-        client.close()
+        self.socket.connect(url)
+        send_with_timeout(self.socket, json.dumps(stop_message))
 
     def test_start_serving(self):
         """
@@ -83,23 +83,21 @@ class TestDistributor(unittest.TestCase):
 
         time_delay = 0.1
         url = self._start_serving()
-        server_proc = self.distributor.server_proc
-        server_proc.join(time_delay)
+        self.distributor.server_proc.join(time_delay)
         #Server will loop forever unless it hits an error
-        self.assertTrue(server_proc.is_alive())
+        self.assertTrue(self.distributor.server_proc.is_alive())
 
     def test_stop_serving(self):
         stop_message = {'type': 'command',
                         'command': 'stop'}
 
-        server_proc, url = self._start_serving()
-        self.assertTrue(server_proc.is_alive())
+        url = self._start_serving()
+        self.assertTrue(self.distributor.server_proc.is_alive())
 
-        client = self.context.socket(zmq.REQ)
-        client.connect(url)
+        self.socket.connect(url)
 
         time_limit = 1
-        tracker = client.send(json.dumps(stop_message),
+        tracker = self.socket.send(json.dumps(stop_message),
                               copy=False, track=True)
         start_time = time.clock()
         while(not tracker.done):
@@ -108,15 +106,14 @@ class TestDistributor(unittest.TestCase):
                              'Timeout while sending message to server')
             time.sleep(0.1)
 
-        resp = parse_json(client.recv())
+        resp = parse_json(self.socket.recv())
         self.assertTrue('status' in resp)
         self.assertTrue(resp['status'] == 'stopping')
 
         #Race condition here. We resolve by waiting awhile,
         #give the server some time to stop
         time.sleep(1)
-        self.assertFalse(server_proc.is_alive())
-        client.close()
+        self.assertFalse(self.distributor.server_proc.is_alive())
 
     def test_get_work_01(self):
         """
@@ -130,8 +127,8 @@ class TestDistributor(unittest.TestCase):
         del self.distributor
         self.setUp()
 
-        server_proc, url = self._start_serving()
-        self.assertTrue(server_proc.is_alive())
+        url = self._start_serving()
+        self.assertTrue(self.distributor.server_proc.is_alive())
 
         num_trials = 100
         fetcher = JobTransit(url)
@@ -155,27 +152,25 @@ class TestDistributor(unittest.TestCase):
         del self.distributor
         self.setUp()
 
-        server_proc, url = self._start_serving()
-        self.assertTrue(server_proc.is_alive())
-        fetcher = JobTransit(url)
+        url = self._start_serving()
+        self.assertTrue(self.distributor.server_proc.is_alive())
+        fetcher = JobTransit(url, self.context)
 
-        controller = self.context.socket(zmq.REQ)
-        controller.connect(url)
+        self.socket.connect(url)
 
         received = set()
         while True:
             job = fetcher.fetch_job()
-            is_valid = job.is_valid
-            if(not is_valid):
+            if(job and job.is_valid):
                 break
             msg = {'type': 'command',
                    'command': 'remove',
                    'id': job.job_num}
-            controller.send(json.dumps(msg))
-            rec = parse_json(controller.recv())
+            self.socket.send(json.dumps(msg))
+            rec = parse_json(self.socket.recv())
             self.assertTrue(rec['status'] == 'success')
             received.add(job.job_num)
-            if(job.num_remaining == 1):
+            if(job.num_remaining == 0):
                 break
 
         act_num_jobs = len(received)
@@ -184,10 +179,10 @@ class TestDistributor(unittest.TestCase):
         self.assertTrue(expected, received)
 
     @np.testing.decorators.slow
-    @unittest.skip('')
+    @unittest.skip('slow')
     def test_single_job(self):
-        server_proc, url = self._start_serving()
-        transit = JobTransit(url)
+        url = self._start_serving()
+        transit = JobTransit(url, self.context)
         jobinfo = transit.fetch_job()
         measurement = single_job(jobinfo)
         #print measurement
@@ -196,20 +191,20 @@ class TestDistributor(unittest.TestCase):
     @np.testing.decorators.slow
     @unittest.skip('lengthy test')
     def test_worker_looper(self):
-        server_proc, url = self._start_serving()
-        responses = worker_looper(url)
+        url = self._start_serving()
+        responses = worker_looper(url, self.context)
         self._stop_serving_clean(url)
         for response in responses:
             self.assertEqual(response['status'], 'success')
-        self.assertFalse(server_proc.is_alive())
+        self.assertFalse(self.distributor.server_procis_alive())
 
     @np.testing.decorators.slow
     def test_report_measurements(self):
-        server_proc, url = self._start_serving()
+        url = self._start_serving()
 
         meas_file = os.path.join(test_data_dir, 'CpmeasurementsGhqeaL.hdf5')
         curr_meas = cpmeas.load_measurements(filename=meas_file)
-        transit = JobTransit(url)
+        transit = JobTransit(url, context=self.context)
         jobinfo = JobInfo(0, 0, None, None, 1)
 
         response = transit.report_measurements(jobinfo, curr_meas)

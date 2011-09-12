@@ -20,10 +20,14 @@ force_run_multiprocess = False
 def run_multiprocess():
     return (force_run_multiprocess or cpprefs.get_run_multiprocess())
 
-def worker_looper(url):
+def worker_looper(url, context=None):
+    """
+    TODO: WRITE DOCSTRING
+    NOTE: DO NOT PASS zmq.CONTEXT ACROSS PROCESSES
+    """
     has_work = True
     responses = []
-    transit = JobTransit(url)
+    transit = JobTransit(url, context=None)
     while has_work:
         jobinfo = transit.fetch_job()
         if(jobinfo and jobinfo.is_valid):
