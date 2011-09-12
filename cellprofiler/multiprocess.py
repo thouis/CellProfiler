@@ -4,11 +4,12 @@ on a machine and processing in parallel
 """
 
 import multiprocessing
+from multiprocessing import Process
 import StringIO
 import time
 import logging
 
-from distributed import JobTransit
+from distributed import JobTransit, Distributor
 
 from cellprofiler.pipeline import Pipeline
 import cellprofiler.preferences as cpprefs
@@ -29,6 +30,7 @@ def worker_looper(url):
             measurements = single_job(jobinfo)
             response = transit.report_measurements(jobinfo, measurements)
             responses.append(response)
+            print response
         else:
             has_work = False
     return response
@@ -57,8 +59,7 @@ def run_multiple_workers(url, num_workers=None):
 
     Returns
     -----------
-    pool - multiprocessing.Pool
-        The pool doing work
+    pool - multiprocessing.Pool doing work
     """
     if(not num_workers):
         num_workers = multiprocessing.cpu_count()
@@ -67,29 +68,25 @@ def run_multiple_workers(url, num_workers=None):
 
     urls = [url] * num_workers
     for url in urls:
-        pool.apply_async(worker_looper, args=(url))
+        pool.apply_async(worker_looper, args=(url,))
     #Note: The results will not be available immediately
     #because we haven't joined the pool
+    pool.close()
     return pool
-#
-#def _start_serving_headless(pipeline,output_file_path,
-#                            address, port):
-#    distributor = Distributor()
-#    distributor.start_serving(pipeline, output_file_path)
-#    print "serving at ", distributor.server_URL
-#    return distributor
-#
-#def run_pipeline_headless(pipeline,output_file_path,
-#                            address, port):
-#    distributor = _start_serving_headless(pipeline, output_file_path,
-#                                          address, port)
-#    #Start workers
-#    pool = run_multiple_workers(distributor.server_URL)
-#
-#    running_pipeline = distributor.run_with_yield()
-#    for ghost in running_pipeline:
-#        time.sleep(0.1)
-#        pass
+
+def start_serving_headless(pipeline, output_file_path, address, port=None):
+    distributor = Distributor(pipeline, output_file_path, address, port)
+    url = distributor.start_serving()
+    return distributor
+
+def run_pipeline_headless(pipeline, output_file_path,
+                            address, port=None):
+    distributor = start_serving_headless(pipeline, output_file_path,
+                                          address, port)
+
+    pool = run_multiple_workers(distributor.url)
+    pool.join()
+    return pool
 
 if __name__ == '__main__':
     pass

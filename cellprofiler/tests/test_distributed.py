@@ -9,10 +9,11 @@ import numpy as np
 from cellprofiler.modules.tests import example_images_directory
 from cellprofiler.pipeline import Pipeline
 from cellprofiler.distributed import JobTransit, JobInfo
-from cellprofiler.distributed import  Distributor, parse_json, start_serving
+from cellprofiler.distributed import  Distributor, parse_json
 import cellprofiler.preferences as cpprefs
-from cellprofiler.multiprocess import single_job, worker_looper
+from cellprofiler.multiprocess import single_job, worker_looper, run_pipeline_headless
 import cellprofiler.measurements as cpmeas
+from test_Measurements import compare_measurements
 
 test_dir = os.path.dirname(os.path.abspath(__file__))
 test_data_dir = os.path.join(test_dir, 'data')
@@ -209,19 +210,19 @@ class TestDistributor(unittest.TestCase):
         self.assertTrue('mismatched pipeline hash' in response['code'])
         self._stop_serving_clean(url)
 
-    #@unittest.expectedFailure
-    @unittest.skip('lengthy test and expected failure')
-    def test_wound_healing(self):
-        server_proc, url = self._start_serving()
-        responses = worker_looper(url)
-        expected_meas_fi = os.path.join(test_data_dir, 'WoundHealingResults.h5')
-        act_meas_fi = self.output_file
-        exp_meas = cpmeas.load(filename=expected_meas_fi)
-        act_meas = cpmeas.load(filename=act_meas_fi)
-        from cellprofiler.tests.test_Measurements import tst_compare_measurements
-        tst_compare_measurements(exp_meas, act_meas)
+#    #@unittest.expectedFailure
+#    @unittest.skip('lengthy test and expected failure')
+#    def test_wound_healing(self):
+#        server_proc, url = self._start_serving()
+#        responses = worker_looper(url)
+#        expected_meas_fi = os.path.join(test_data_dir, 'WoundHealingResults.h5')
+#        act_meas_fi = self.output_file
+#        exp_meas = cpmeas.load(filename=expected_meas_fi)
+#        act_meas = cpmeas.load(filename=act_meas_fi)
+#        from cellprofiler.tests.test_Measurements import tst_compare_measurements
+#        tst_compare_measurements(exp_meas, act_meas)
 
-    """
+
     @np.testing.decorators.slow
     def test_wound_healing(self):
         ex_dir = example_images_directory()
@@ -235,13 +236,13 @@ class TestDistributor(unittest.TestCase):
         pipeline = Pipeline()
         pipeline.load(pipeline_path)
 
-        multiprocess.run_pipeline_multi(pipeline, self.port, output_file_path, None)
+        run_pipeline_headless(pipeline, output_file_path, self.address, self.port)
 
-        ref_meas = measurements.load_measurements(ref_data_path)
-        test_meas = measurements.load_measurements(output_file_path)
+        ref_meas = cpmeas.load_measurements(ref_data_path)
+        test_meas = cpmeas.load_measurements(output_file_path)
 
         compare_measurements(ref_meas, test_meas, check_feature)
-    """
+
 def check_feature(feat_name):
         fnl = feat_name.lower()
         ignore = ['executiontime', 'pathname', 'filename']
@@ -252,9 +253,9 @@ def check_feature(feat_name):
 
 def suite():
     suite = unittest.TestSuite()
-    suite.addTest(TestDistributor('test_get_work_01'))
+    suite.addTest(TestDistributor('test_wound_healing'))
     return suite
 
 if __name__ == "__main__":
-    unittest.main()
-    #unittest.TextTestRunner(verbosity=2).run(suite())
+    #unittest.main()
+    unittest.TextTestRunner(verbosity=2).run(suite())
