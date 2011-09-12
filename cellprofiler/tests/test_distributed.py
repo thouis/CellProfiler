@@ -19,7 +19,6 @@ test_dir = os.path.dirname(os.path.abspath(__file__))
 test_data_dir = os.path.join(test_dir, 'data')
 
 class TestDistributor(unittest.TestCase):
-
     def setUp(self):
         self.address = "tcp://127.0.0.1"
         self.port = None
@@ -179,7 +178,7 @@ class TestDistributor(unittest.TestCase):
         expected = set(xrange(1, num_jobs + 1))
         self.assertTrue(expected, received)
 
-    #@np.testing.decorators.slow
+    @np.testing.decorators.slow
     @unittest.skip('')
     def test_single_job(self):
         server_proc, url = self._start_serving()
@@ -189,14 +188,16 @@ class TestDistributor(unittest.TestCase):
         #print measurement
         self._stop_serving_clean(url)
 
-    #@unittest.expectedFailure
-    @unittest.skip('lengthy test and expected failure')
+    @np.testing.decorators.slow
+    #@unittest.skip('lengthy test and expected failure')
     def test_worker_looper(self):
         server_proc, url = self._start_serving()
         responses = worker_looper(url)
-        print responses
         self._stop_serving_clean(url)
+        for response in responses:
+            self.assertTrue(response['status'] == 'success')
 
+    @np.testing.decorators.slow
     def test_report_measurements(self):
         server_proc, url = self._start_serving()
 
@@ -209,19 +210,6 @@ class TestDistributor(unittest.TestCase):
         self.assertTrue('code' in response)
         self.assertTrue('mismatched pipeline hash' in response['code'])
         self._stop_serving_clean(url)
-
-#    #@unittest.expectedFailure
-#    @unittest.skip('lengthy test and expected failure')
-#    def test_wound_healing(self):
-#        server_proc, url = self._start_serving()
-#        responses = worker_looper(url)
-#        expected_meas_fi = os.path.join(test_data_dir, 'WoundHealingResults.h5')
-#        act_meas_fi = self.output_file
-#        exp_meas = cpmeas.load(filename=expected_meas_fi)
-#        act_meas = cpmeas.load(filename=act_meas_fi)
-#        from cellprofiler.tests.test_Measurements import tst_compare_measurements
-#        tst_compare_measurements(exp_meas, act_meas)
-
 
     @np.testing.decorators.slow
     def test_wound_healing(self):
@@ -245,7 +233,8 @@ class TestDistributor(unittest.TestCase):
 
 def check_feature(feat_name):
         fnl = feat_name.lower()
-        ignore = ['executiontime', 'pathname', 'filename']
+        ignore = ['executiontime', 'pathname', 'filename', 'pipeline_pipeline',
+                  'group_index']
         for igflag in ignore:
             if igflag in fnl:
                 return False
