@@ -662,7 +662,26 @@ class TestMeasurements(unittest.TestCase):
         self.tst_combine(img_nums_1, img_nums_2)
 
 
-def compare_measurements(ideal_meas, act_meas):
+def compare_measurements(ideal_meas_input, act_meas_input, check_feature=lambda s: True):
+    """
+    Compare 2 Measurement objects, assert all fields the same. 
+    
+    Parameters
+    -----------
+    ideal_meas: Measurements, or string path to it
+    act_meas: Measurements, or string path to it
+    check_feature : callable, optional
+    should take 1 argument, the feature name. Return true to check between
+    objects, False to ignore. Default checks all.
+    """
+
+    ideal_meas = ideal_meas_input
+    act_meas = act_meas_input
+    if(isinstance(ideal_meas, str)):
+        ideal_meas = cpmeas.load_measurements(ideal_meas)
+    if(isinstance(act_meas, str)):
+        act_meas = cpmeas.load_measurements(act_meas)
+
     obj_names = ideal_meas.get_object_names()
     image_numbers = ideal_meas.get_image_numbers()
     np.testing.assert_equal(sorted(image_numbers), sorted(act_meas.get_image_numbers()))
@@ -672,6 +691,8 @@ def compare_measurements(ideal_meas, act_meas):
         np.testing.assert_equal(sorted(feature_names), sorted(act_feat_names))
 
         for feat_name in feature_names:
+            if(not check_feature(feat_name)):
+                continue
             for img_num in image_numbers:
                 ideal_dat = ideal_meas.get_measurement(obj_name, feat_name, img_num)
                 act_dat = act_meas.get_measurement(obj_name, feat_name, img_num)
