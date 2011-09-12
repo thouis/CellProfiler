@@ -6,8 +6,8 @@ import hashlib
 import tempfile
 import json
 import urllib2
-import cPickle
 import base64
+from multiprocessing import Manager, Process, Lock
 
 import logging
 from collections import OrderedDict
@@ -37,31 +37,56 @@ class QueueDict(OrderedDict):
             self[key] = value
         return [key, value]
 
+#Yay Windows! Can't start run bound methods using Process.__init__
+def start_serving(distributor, data_dict, lock):
+        with lock:
+            data_dict['url'] = distributor._prepare_socket()
+            distributor._prepare_queue()
+        #Start listening loop. This is blocking
+        distributor._run()
+        return distributor
+
 class Distributor(object):
-    def __init__(self):
-        self.work_server = None
-        self.pipeline = None
-        self.pipeline_path = None
-        self.output_file = None
-        self.measurements = None
-        self.work_queue = QueueDict()
+    def __init__(self, pipeline, output_file, address="tcp://127.0.0.1", port=None):
+        self.pipeline = pipeline
+        self.output_file = output_file
+        self.address = address
+        self.port = port
+        self.url = None
+        self._work_queue = QueueDict()
 
-    def start_serving(self, pipeline, output_file,
-                      address="tcp://127.0.0.1", port=5555):
-        self.prepare_queue(pipeline, output_file)
-        context, socket = self.prepare_socket(address, port)
-        #This is blocking
-        self.run(context, socket)
+        self._pipeline_path = None
 
-    def prepare_queue(self, pipeline, output_file):
+    def start_serving(self):
+        manager = Manager()
+        lock = Lock()
+        data_dict = manager.dict()
+        args = (self, data_dict, lock)
+        self.server_proc = Process(target=start_serving, args=args)
+        self.server_proc.start()
 
-        if(self.pipeline_path is not None):
+        #Can't be sure the child thread will acquire
+        #the lock first. Loop until it does.
+        while(self.url is None):
+            with lock:
+                if 'url' in data_dict:
+                    self.url = data_dict['url']
+
+        if(self.port is None):
+            self.port = int(self.url.split(':')[2])
+        return self.url
+
+    def is_running(self):
+        return self.server_proc.is_alive()
+
+    def _prepare_queue(self):
+
+        if(self._pipeline_path is not None):
             #Assume we have already prepared queue
             return
 
-        self.output_file = output_file
         # duplicate pipeline
-        pipeline = pipeline.copy()
+        pipeline = self.pipeline.copy()
 
         # make sure createbatchfiles is not in the pipeline
         exclude_mods = ['createbatchfiles', 'exporttospreadsheet']
@@ -73,9 +98,9 @@ class Distributor(object):
         # create the image list
         image_set_list = cpi.ImageSetList()
         image_set_list.combine_path_and_file = True
-        self.measurements = cpmeas.Measurements(filename=self.output_file)
+        self._measurements = cpmeas.Measurements(filename=self.output_file)
         workspace = cpw.Workspace(pipeline, None, None, None,
-                                  self.measurements, image_set_list)
+                                  self._measurements, image_set_list)
 
         if not pipeline.prepare_run(workspace):
             raise RuntimeError('Could not create image set list.')
@@ -108,38 +133,42 @@ class Distributor(object):
         pipeline_blob = zlib.compress(pipeline_txt)
         pipeline_file.write(pipeline_blob)
         pipeline_file.close()
-        self.pipeline_path = 'file://%s' % (pipeline_path)
+        self._pipeline_path = 'file://%s' % (pipeline_path)
 
         # we use the hash to make sure old results don't pollute new
         # ones, and that workers are fetching what they expect.
-        self.pipeline_blob_hash = hashlib.sha1(pipeline_blob).hexdigest()
+        self._pipeline_blob_hash = hashlib.sha1(pipeline_blob).hexdigest()
 
         # add jobs for each image set
         #XXX Maybe use guid instead of img_set_index?
         for img_set_index in range(image_set_list.count()):
-            self.work_queue[img_set_index + 1] = \
-                {'pipeline_hash': self.pipeline_blob_hash}
+            self._work_queue[img_set_index + 1] = \
+                {'pipeline_hash': self._pipeline_blob_hash}
 
-        self.total_jobs = image_set_list.count()
+        self._total_jobs = image_set_list.count()
+        return self._work_queue
 
-    def prepare_socket(self, address='tcp://127.0.0.1', port=None):
+    def _prepare_socket(self):
         context = zmq.Context()
         socket = context.socket(zmq.REP)
-        if(port is not None):
-            self.url = "%s:%s" % (address, int(port))
+        if(self.port is not None):
+            self.url = "%s:%s" % (self.address, int(self.port))
             socket.bind(self.url)
         else:
-            port = socket.bind_to_random_port(address)
-            self.url = "%s:%s" % (address, port)
+            port = socket.bind_to_random_port(self.address)
+            self.url = "%s:%s" % (self.address, port)
 
-        return context, socket
+        self._context = context
+        self._socket = socket
+        return self.url
 
-    def run(self, context, socket):
-        self.jobs_finished = 0
+    def _run(self):
+        self._jobs_finished = 0
+        socket = self._socket
 
         print 'server running on %s' % self.url
-        self.running = True
-        while self.running:
+        self._looping = True
+        while self._looping:
             #XXX Implement a timeout
             raw_msg = socket.recv()
             msg = parse_json(raw_msg)
@@ -149,48 +178,45 @@ class Distributor(object):
                 #TODO Log something
                 pass
             elif(msg['type'] == 'pipeline_path'):
-                response = self.get_pipeline_info()
+                response = self._get_pipeline_info()
             elif(msg['type'] == 'next_job'):
-                job = self.get_next()
+                job = self._get_next()
                 if(job is None):
                     response = {'status': 'nowork'}
                 else:
                     #job = [key,value]. value is a dict of the properties
                     response = {'id': job[0],
-                                'num_remaining': self.num_remaining()}
+                                'num_remaining': self._num_remaining()}
                     response.update(job[1])
             elif((msg['type'] == 'result') and ('result' in msg)):
-                response = self.report_result(msg)
+                response = self._report_result(msg)
             elif((msg['type']) == 'command'):
-                response = self.receive_command(msg)
+                response = self._receive_command(msg)
 
             socket.send(json.dumps(response))
 
-            self.running &= (self.num_remaining() > 0)
+            self._looping &= (self._num_remaining() > 0)
 
-        socket.close()
-        context.term()
+        self._stop_serving()
 
-        self.stop_serving()
+    def _num_remaining(self):
+        return len(self._work_queue)
 
-    def num_remaining(self):
-        return len(self.work_queue)
-
-    def get_next(self):
+    def _get_next(self):
         try:
-            return self.work_queue.rotate()
+            return self._work_queue.rotate()
         except KeyError:
             #No work left
             return None
 
-    def get_pipeline_info(self):
-        return {'path': self.pipeline_path,
-                    'pipeline_hash': self.pipeline_blob_hash}
+    def _get_pipeline_info(self):
+        return {'path': self._pipeline_path,
+                    'pipeline_hash': self._pipeline_blob_hash}
 
-    def report_result(self, msg):
+    def _report_result(self, msg):
         jobnum = msg['id']
         pipeline_hash = msg['pipeline_hash']
-        work_item = self.work_queue.get(jobnum, None)
+        work_item = self._work_queue.get(jobnum, None)
         #print work_item
         response = {'status': 'failure'}
         if(work_item is None):
@@ -210,16 +236,16 @@ class Distributor(object):
             temp_hdf5.flush()
             curr_meas = cpmeas.load_measurements(filename=temp_hdf5.name)
 
-            self.measurements.combine_measurements(curr_meas,
+            self._measurements.combine_measurements(curr_meas,
                                                    can_overwrite=True)
             del curr_meas
-            del self.work_queue[jobnum]
-            self.jobs_finished += 1
+            del self._work_queue[jobnum]
+            self._jobs_finished += 1
             response = {'status': 'success',
-                        'num_remaining': self.num_remaining()}
+                        'num_remaining': self._num_remaining()}
         return response
 
-    def receive_command(self, msg):
+    def _receive_command(self, msg):
         """
         Control commands from client to server.
 
@@ -228,30 +254,32 @@ class Distributor(object):
         """
         command = msg['command'].lower()
         if(command == 'stop'):
-            self.running = False
+            self._looping = False
             response = {'status': 'stopping'}
         elif(command == 'remove'):
             jobid = '?'
             try:
                 jobid = msg['id']
                 response = {'id': jobid}
-                del self.work_queue[jobid]
+                del self._work_queue[jobid]
                 response['status'] = 'success'
             except KeyError, exc:
                 logger.error('could not delete jobid %s: %s' % (jobid, exc))
                 response['status'] = 'notfound'
         return response
 
-    def stop_serving(self):
-        self.running = False
-        self.work_queue.clear()
-        if 'file://' in self.pipeline_path:
-            path = self.pipeline_path[len('file://')::]
+    def _stop_serving(self):
+        self._looping = False
+        self._socket.close()
+        self._context.term()
+        self._work_queue.clear()
+        if 'file://' in self._pipeline_path:
+            path = self._pipeline_path[len('file://')::]
         try:
             os.unlink(path)
         except OSError:
             pass
-        self.pipeline_path = None
+        self._pipeline_path = None
 
 class JobTransit(object):
     def __init__(self, url, context=None, socket=None):
@@ -317,10 +345,7 @@ class JobTransit(object):
     def report_measurements(self, jobinfo, measurements):
         meas_file = open(measurements.hdf5_dict.filename, 'r+b')
         meas_str = meas_file.read()
-        start = time.clock()
         send_str = base64.b64encode(meas_str)
-        elapsed = time.clock() - start
-        print '%2.5e sec to encode string of length %s' % (elapsed, len(meas_str))
 
         msg = {'type': 'result', 'result': send_str}
         msg.update(jobinfo.get_dict())

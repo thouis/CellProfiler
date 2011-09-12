@@ -1,15 +1,15 @@
 import unittest
 import os
-from multiprocessing import Process
 import json
 import time
 
 import zmq
+import numpy as np
 
 from cellprofiler.modules.tests import example_images_directory
 from cellprofiler.pipeline import Pipeline
 from cellprofiler.distributed import JobTransit, JobInfo
-from cellprofiler.distributed import  Distributor, parse_json
+from cellprofiler.distributed import  Distributor, parse_json, start_serving
 import cellprofiler.preferences as cpprefs
 from cellprofiler.multiprocess import single_job, worker_looper
 import cellprofiler.measurements as cpmeas
@@ -21,7 +21,7 @@ class TestDistributor(unittest.TestCase):
 
     def setUp(self):
         self.address = "tcp://127.0.0.1"
-        self.port = 5580
+        self.port = None
 
         info = self.id().split('.')[-1]
         output_finame = info + '.h5'
@@ -35,7 +35,8 @@ class TestDistributor(unittest.TestCase):
         self.pipeline = Pipeline()
         self.pipeline.load(pipeline_path)
 
-        self.distributor = Distributor()
+        self.distributor = Distributor(self.pipeline, self.output_file,
+                                       self.address, self.port)
 
         #Might be better to write these paths into the pipeline
         self.old_image_dir = cpprefs.get_default_image_directory()
@@ -58,19 +59,16 @@ class TestDistributor(unittest.TestCase):
         cpprefs.set_default_image_directory(self.old_image_dir)
 
     def _start_serving(self, port=None):
-        if(port is None):
-            port = self.port
-        args = (self.pipeline, self.output_file, self.address, port)
-        server_proc = Process(target=self.distributor.start_serving, args=args)
-        server_proc.start()
-        self.procs.append(server_proc)
-        return server_proc
+        url = self.distributor.start_serving()
+        return self.distributor.server_proc, url
 
-    def _stop_serving_clean(self):
+    def _stop_serving_clean(self, url=None):
         stop_message = {'type': 'command',
                         'command': 'stop'}
         client = self.context.socket(zmq.REQ)
-        client.connect('%s:%s' % (self.address, self.port))
+        if(url is None):
+            url = '%s:%s' % (self.address, self.port)
+        client.connect(url)
         client.send(json.dumps(stop_message), copy=False, track=True)
 
     def test_start_serving(self):
@@ -79,8 +77,9 @@ class TestDistributor(unittest.TestCase):
         make sure nothing goes wrong.
         """
 
-        time_delay = 4
-        server_proc = self._start_serving()
+        time_delay = 0.1
+        url = self._start_serving()
+        server_proc = self.distributor.server_proc
         server_proc.join(time_delay)
         #Server will loop forever unless it hits an error
         self.assertTrue(server_proc.is_alive())
@@ -89,11 +88,11 @@ class TestDistributor(unittest.TestCase):
         stop_message = {'type': 'command',
                         'command': 'stop'}
 
-        server_proc = self._start_serving()
+        server_proc, url = self._start_serving()
         self.assertTrue(server_proc.is_alive())
 
         client = self.context.socket(zmq.REQ)
-        client.connect('%s:%s' % (self.address, self.port))
+        client.connect(url)
 
         time_limit = 1
         tracker = client.send(json.dumps(stop_message),
@@ -121,16 +120,15 @@ class TestDistributor(unittest.TestCase):
         make sure jobs are served over and over
         """
 
-        self.distributor.prepare_queue(self.pipeline, self.output_file)
-        num_jobs = self.distributor.total_jobs
+        self.distributor._prepare_queue()
+        num_jobs = self.distributor._total_jobs
         del self.distributor
         self.setUp()
 
-        server_proc = self._start_serving()
+        server_proc, url = self._start_serving()
         self.assertTrue(server_proc.is_alive())
 
         num_trials = 100
-        url = "%s:%s" % (self.address, self.port)
         fetcher = JobTransit(url)
 
         for tri in xrange(num_trials):
@@ -141,20 +139,19 @@ class TestDistributor(unittest.TestCase):
             act_tri = job.job_num
             self.assertEqual(exp_tri, act_tri, 'Job Numbers do not match')
 
-        self._stop_serving_clean()
+        self._stop_serving_clean(url)
 
     def test_remove_work(self):
         """
         Get jobs and delete them from server (do not report results)
         """
-        self.distributor.prepare_queue(self.pipeline, self.output_file)
-        num_jobs = self.distributor.total_jobs
+        self.distributor._prepare_queue()
+        num_jobs = self.distributor._total_jobs
         del self.distributor
         self.setUp()
 
-        server_proc = self._start_serving()
+        server_proc, url = self._start_serving()
         self.assertTrue(server_proc.is_alive())
-        url = "%s:%s" % (self.address, self.port)
         fetcher = JobTransit(url)
 
         controller = self.context.socket(zmq.REQ)
@@ -181,27 +178,26 @@ class TestDistributor(unittest.TestCase):
         expected = set(xrange(1, num_jobs + 1))
         self.assertTrue(expected, received)
 
+    #@np.testing.decorators.slow
+    @unittest.skip('')
     def test_single_job(self):
-        self._start_serving()
-        url = '%s:%s' % (self.address, self.port)
+        server_proc, url = self._start_serving()
         transit = JobTransit(url)
         jobinfo = transit.fetch_job()
         measurement = single_job(jobinfo)
         #print measurement
-        self._stop_serving_clean()
+        self._stop_serving_clean(url)
 
     #@unittest.expectedFailure
     @unittest.skip('lengthy test and expected failure')
     def test_worker_looper(self):
-        self._start_serving()
-        url = '%s:%s' % (self.address, self.port)
+        server_proc, url = self._start_serving()
         responses = worker_looper(url)
         print responses
-        self._stop_serving_clean()
+        self._stop_serving_clean(url)
 
     def test_report_measurements(self):
-        self._start_serving()
-        url = '%s:%s' % (self.address, self.port)
+        server_proc, url = self._start_serving()
 
         meas_file = os.path.join(test_data_dir, 'Cpmeasurementsam6C7Z.hdf5')
         curr_meas = cpmeas.load_measurements(filename=meas_file)
@@ -211,13 +207,12 @@ class TestDistributor(unittest.TestCase):
         response = transit.report_measurements(jobinfo, curr_meas)
         self.assertTrue('code' in response)
         self.assertTrue('mismatched pipeline hash' in response['code'])
-        self._stop_serving_clean()
+        self._stop_serving_clean(url)
 
     #@unittest.expectedFailure
     @unittest.skip('lengthy test and expected failure')
     def test_wound_healing(self):
-        self._start_serving()
-        url = '%s:%s' % (self.address, self.port)
+        server_proc, url = self._start_serving()
         responses = worker_looper(url)
         expected_meas_fi = os.path.join(test_data_dir, 'WoundHealingResults.h5')
         act_meas_fi = self.output_file
@@ -226,11 +221,40 @@ class TestDistributor(unittest.TestCase):
         from cellprofiler.tests.test_Measurements import tst_compare_measurements
         tst_compare_measurements(exp_meas, act_meas)
 
+    """
+    @np.testing.decorators.slow
+    def test_wound_healing(self):
+        ex_dir = example_images_directory()
+        pipeline_path = os.path.join(ex_dir, 'ExampleWoundHealingImages', 'ExampleWoundHealing.cp')
+        ref_data_path = os.path.join(test_data_dir, 'ExampleWoundHealingImages', 'ExampleWoundHealing_ref.h5')
+        output_file_path = os.path.join(test_data_dir, 'output', 'test_wound_healing.h5')
+
+        self.tst_pipeline_multi(pipeline_path, ref_data_path, output_file_path)
+
+    def tst_pipeline_multi(self, pipeline_path, ref_data_path, output_file_path):
+        pipeline = Pipeline()
+        pipeline.load(pipeline_path)
+
+        multiprocess.run_pipeline_multi(pipeline, self.port, output_file_path, None)
+
+        ref_meas = measurements.load_measurements(ref_data_path)
+        test_meas = measurements.load_measurements(output_file_path)
+
+        compare_measurements(ref_meas, test_meas, check_feature)
+    """
+def check_feature(feat_name):
+        fnl = feat_name.lower()
+        ignore = ['executiontime', 'pathname', 'filename']
+        for igflag in ignore:
+            if igflag in fnl:
+                return False
+        return True
+
 def suite():
     suite = unittest.TestSuite()
-    suite.addTest(TestDistributor('test_report_measurements'))
+    suite.addTest(TestDistributor('test_get_work_01'))
     return suite
 
 if __name__ == "__main__":
-    #unittest.main()
-    unittest.TextTestRunner(verbosity=2).run(suite())
+    unittest.main()
+    #unittest.TextTestRunner(verbosity=2).run(suite())
