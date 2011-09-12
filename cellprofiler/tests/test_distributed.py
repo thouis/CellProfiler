@@ -8,8 +8,8 @@ import numpy as np
 
 from cellprofiler.modules.tests import example_images_directory
 from cellprofiler.pipeline import Pipeline
-from cellprofiler.distributed import JobTransit, JobInfo
-from cellprofiler.distributed import  Distributor, parse_json
+from cellprofiler.distributed import JobTransit, JobInfo, Distributor
+from cellprofiler.distributed import  send_with_timeout, parse_json
 import cellprofiler.preferences as cpprefs
 from cellprofiler.multiprocess import single_job, worker_looper, run_pipeline_headless
 import cellprofiler.measurements as cpmeas
@@ -52,9 +52,12 @@ class TestDistributor(unittest.TestCase):
 
         self.pipeline = None
         self.distributor = None
-        self.context.term()
+        #This hangs if we haven't closed all the sockets
+        #self.context.term()
         for proc in self.procs:
-            proc.terminate()
+            if(proc.is_alive()):
+                print 'terminating ' + proc.name()
+                proc.terminate()
 
         cpprefs.set_default_image_directory(self.old_image_dir)
 
@@ -69,7 +72,8 @@ class TestDistributor(unittest.TestCase):
         if(url is None):
             url = '%s:%s' % (self.address, self.port)
         client.connect(url)
-        client.send(json.dumps(stop_message), copy=False, track=True)
+        send_with_timeout(client, json.dumps(stop_message))
+        client.close()
 
     def test_start_serving(self):
         """
@@ -112,6 +116,7 @@ class TestDistributor(unittest.TestCase):
         #give the server some time to stop
         time.sleep(1)
         self.assertFalse(server_proc.is_alive())
+        client.close()
 
     def test_get_work_01(self):
         """
@@ -189,19 +194,20 @@ class TestDistributor(unittest.TestCase):
         self._stop_serving_clean(url)
 
     @np.testing.decorators.slow
-    #@unittest.skip('lengthy test and expected failure')
+    @unittest.skip('lengthy test')
     def test_worker_looper(self):
         server_proc, url = self._start_serving()
         responses = worker_looper(url)
         self._stop_serving_clean(url)
         for response in responses:
-            self.assertTrue(response['status'] == 'success')
+            self.assertEqual(response['status'], 'success')
+        self.assertFalse(server_proc.is_alive())
 
     @np.testing.decorators.slow
     def test_report_measurements(self):
         server_proc, url = self._start_serving()
 
-        meas_file = os.path.join(test_data_dir, 'Cpmeasurementsam6C7Z.hdf5')
+        meas_file = os.path.join(test_data_dir, 'CpmeasurementsGhqeaL.hdf5')
         curr_meas = cpmeas.load_measurements(filename=meas_file)
         transit = JobTransit(url)
         jobinfo = JobInfo(0, 0, None, None, 1)
@@ -212,6 +218,7 @@ class TestDistributor(unittest.TestCase):
         self._stop_serving_clean(url)
 
     @np.testing.decorators.slow
+    @unittest.skip('lengthy test')
     def test_wound_healing(self):
         ex_dir = example_images_directory()
         pipeline_path = os.path.join(ex_dir, 'ExampleWoundHealingImages', 'ExampleWoundHealing.cp')
@@ -242,9 +249,9 @@ def check_feature(feat_name):
 
 def suite():
     suite = unittest.TestSuite()
-    suite.addTest(TestDistributor('test_wound_healing'))
+    suite.addTest(TestDistributor('test_worker_looper'))
     return suite
 
 if __name__ == "__main__":
-    #unittest.main()
-    unittest.TextTestRunner(verbosity=2).run(suite())
+    unittest.main()
+    #unittest.TextTestRunner(verbosity=2).run(suite())
