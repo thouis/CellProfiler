@@ -312,7 +312,9 @@ class JobTransit(object):
         return urllib2.urlopen(pipeline_path).read()
 
     def fetch_job(self):
-        self.socket.send(json.dumps({'type': 'next_job'}))
+        sent = send_with_timeout(self.socket, json.dumps({'type': 'next_job'}))
+        if(not sent):
+            return None
         raw_msg = self.socket.recv()
         msg = parse_json(raw_msg)
         if(not msg):
@@ -375,13 +377,14 @@ class JobInfo(object):
         return StringIO.StringIO(zlib.decompress(self.pipeline_blob))
 
 def send_with_timeout(socket, msg, timeout=5):
-    tracker = socket.send(msg, copy=True, track=True)
-    start_time = time.clock()
+    tracker = socket.send(msg, copy=False, track=True)
+    start_time = time.time()
     while(not tracker.done):
         time.sleep(0.05)
-        if(time.clock() - start_time > timeout):
-            return None
-
+        elapsed = time.time() - start_time
+        if(elapsed > timeout):
+            return False
+    return True
 
 def parse_json(raw_msg):
     try:
