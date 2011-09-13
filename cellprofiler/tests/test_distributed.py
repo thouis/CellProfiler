@@ -139,7 +139,8 @@ class TestDistributor(unittest.TestCase):
             self.assertTrue(job.is_valid)
             exp_tri = (tri % num_jobs) + 1
             act_tri = job.job_num
-            self.assertEqual(exp_tri, act_tri, 'Job Numbers do not match')
+            self.assertEqual(exp_tri, act_tri, 'Job Numbers do not match.' +
+                             'Expected %d, found %d' % (exp_tri, act_tri))
 
         self._stop_serving_clean(url)
 
