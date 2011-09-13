@@ -14,6 +14,7 @@ from collections import deque
 logger = logging.getLogger(__name__)
 
 import zmq
+from zmq import NotDone
 
 import cellprofiler.preferences as cpprefs
 import cellprofiler.cpimage as cpi
@@ -27,7 +28,7 @@ def run_distributed():
 
 class WorkServer(Process):
     def __init__(self, distributor, data_dict, lock):
-        super(WorkServer, self).__init__()
+        super(WorkServer, self).__init__(target=self.run, args=(data_dict, lock))
         self.work_queue = distributor.work_queue
         self.data_dict = data_dict
         self.lock = lock
@@ -48,6 +49,7 @@ class WorkServer(Process):
     def _prepare_socket(self):
         context = zmq.Context()
         socket = context.socket(zmq.REP)
+        socket.setsockopt(zmq.LINGER, 100)
         if(self.port is not None):
             self.url = "%s:%s" % (self.address, int(self.port))
             socket.bind(self.url)
@@ -147,7 +149,7 @@ class WorkServer(Process):
             del self.work_queue[work_item_index]
             self._jobs_finished += 1
             response = {'status': 'success',
-                        'num_remaining': self._num_remaining()}
+                        'num_remaining': self.num_remaining()}
         return response
 
     def receive_command(self, msg):
@@ -323,27 +325,18 @@ class QueueDict(deque):
         return value
 
 class JobTransit(object):
-    def __init__(self, url, context=None, socket=None):
+    def __init__(self, url, context):
         self.url = url
         self.context = context
-        self.socket = socket
-        if(self.socket is None):
-            self._init_connection()
-
-    def _init_connection(self):
-        if(self.context is None):
-            self.context = zmq.Context()
-        self.socket = self.context.socket(zmq.REQ)
-        self.socket.connect(self.url)
 
     def _get_pipeline_blob(self):
-        self.socket.send(json.dumps({'type': 'get', 'keys':['pipeline_path']}))
-        raw_msg = self.socket.recv()
-        msg = parse_json(raw_msg)
+        msg = json.dumps({'type': 'get', 'keys':['pipeline_path']})
+        sent, raw_msg = send_recv(self.context, self.url, msg)
 
-        if(not msg):
+        if(not raw_msg):
             return None
 
+        msg = parse_json(raw_msg)
         try:
             pipeline_path = msg['pipeline_path']
         except KeyError:
@@ -353,11 +346,12 @@ class JobTransit(object):
         return urllib2.urlopen(pipeline_path).read()
 
     def fetch_job(self):
-        sent = send_with_timeout(self.socket, json.dumps({'type': 'next'}))
+
+        raw_msg = json.dumps({'type': 'next'})
+        sent, resp = send_recv(self.context, self.url, raw_msg)
         if(not sent):
             return None
-        raw_msg = self.socket.recv()
-        msg = parse_json(raw_msg)
+        msg = parse_json(resp)
 
         if(not msg):
             return None
@@ -395,8 +389,7 @@ class JobTransit(object):
         msg.update(jobinfo.get_dict())
         raw_msg = json.dumps(msg)
 
-        self.socket.send(raw_msg)
-        resp = self.socket.recv()
+        sent, resp = send_recv(self.context, self.url, raw_msg)
         return parse_json(resp)
 
 class JobInfo(object):
@@ -427,14 +420,54 @@ def start_serving(distributor, data_dict, lock):
         distributor._run()
         return distributor
 
+def send_recv(context, url, msg, timeout=5, protocol=zmq.REQ):
+    """
+    Send and recv a message.
+    
+    Parameters
+    ---------
+    context: zmq.context
+    url: string
+        url to connect to
+    msg: buffer
+        Message which will be sent with zmq.send
+    timeout: int,opt
+        Amount of time to wait for message to be sent (seconds).
+        Default is 5.
+    protocol: int,opt
+        zmq protocol. Default is zmq.REQ.
+    
+    Returns
+    ---------
+    sent : bool
+        True if message was successfully sent
+    response : response received, or None
+        response will be None if not sent
+    """
+    socket = context.socket(protocol)
+    socket.connect(url)
+    socket.setsockopt(zmq.LINGER, 0)
+    sent = send_with_timeout(socket, msg, timeout)
+    if(sent):
+        response = socket.recv()
+    else:
+        response = None
+    socket.close()
+    return sent, response
+
+def recv_with_timeout(socket, msg, timeout=5):
+    """
+    zmq treats recv differently. Not sure if we can do this,
+    or if it's necessary.
+    """
+    pass
+
 def send_with_timeout(socket, msg, timeout=5):
     tracker = socket.send(msg, copy=False, track=True)
-    start_time = time.time()
-    while(not tracker.done):
-        time.sleep(0.05)
-        elapsed = time.time() - start_time
-        if(elapsed > timeout):
-            return False
+    try:
+        tracker.wait(timeout)
+    except NotDone:
+        return False
     return True
 
 def parse_json(raw_msg):

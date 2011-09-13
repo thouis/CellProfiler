@@ -9,8 +9,9 @@ import StringIO
 import time
 import logging
 
-from distributed import JobTransit, Distributor
+import zmq
 
+from distributed import JobTransit, Distributor
 from cellprofiler.pipeline import Pipeline
 import cellprofiler.preferences as cpprefs
 
@@ -23,11 +24,15 @@ def run_multiprocess():
 def worker_looper(url, context=None):
     """
     TODO: WRITE DOCSTRING
-    NOTE: DO NOT PASS zmq.CONTEXT ACROSS PROCESSES
+    NOTE: DO NOT PASS zmq.CONTEXT ACROSS PROCESSES.
+    When calling the looper from a parent process,
+    create the context there (should only 1 one per process)
     """
     has_work = True
     responses = []
-    transit = JobTransit(url, context=None)
+    if(context is None):
+        context = zmq.Context()
+    transit = JobTransit(url, context)
     while has_work:
         jobinfo = transit.fetch_job()
         if(jobinfo and jobinfo.is_valid):

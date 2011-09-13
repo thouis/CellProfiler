@@ -9,7 +9,7 @@ import numpy as np
 from cellprofiler.modules.tests import example_images_directory
 from cellprofiler.pipeline import Pipeline
 from cellprofiler.distributed import JobTransit, JobInfo, Distributor
-from cellprofiler.distributed import  send_with_timeout, parse_json
+from cellprofiler.distributed import  send_recv, parse_json
 import cellprofiler.preferences as cpprefs
 from cellprofiler.multiprocess import single_job, worker_looper, run_pipeline_headless
 import cellprofiler.measurements as cpmeas
@@ -20,6 +20,7 @@ test_data_dir = os.path.join(test_dir, 'data')
 
 class TestDistributor(unittest.TestCase):
     def setUp(self):
+        #print 'starting test %s' % self.id()
         self.address = "tcp://127.0.0.1"
         self.port = None
 
@@ -44,6 +45,10 @@ class TestDistributor(unittest.TestCase):
 
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REQ)
+        #Amount of time (in msec) to allow a socket to stay open
+        #for messages to be sent. We shouldn't need this > 0, default
+        #is infinite (-1).
+        self.socket.setsockopt(zmq.LINGER, 100)
         self.procs = []
 
     def tearDown(self):
@@ -62,6 +67,7 @@ class TestDistributor(unittest.TestCase):
                 proc.terminate()
 
         cpprefs.set_default_image_directory(self.old_image_dir)
+        #print 'finished test %s' % self.id()
 
     def _start_serving(self, port=None):
         url = self.distributor.start_serving()
@@ -72,8 +78,8 @@ class TestDistributor(unittest.TestCase):
                         'command': 'stop'}
         if(url is None):
             url = '%s:%s' % (self.address, self.port)
-        self.socket.connect(url)
-        send_with_timeout(self.socket, json.dumps(stop_message))
+        msg = json.dumps(stop_message)
+        send_recv(self.context, url, msg)
 
     def test_start_serving(self):
         """
@@ -86,6 +92,7 @@ class TestDistributor(unittest.TestCase):
         self.distributor.server_proc.join(time_delay)
         #Server will loop forever unless it hits an error
         self.assertTrue(self.distributor.server_proc.is_alive())
+        self.distributor.stop_serving(force=True)
 
     def test_stop_serving(self):
         stop_message = {'type': 'command',
@@ -94,19 +101,12 @@ class TestDistributor(unittest.TestCase):
         url = self._start_serving()
         self.assertTrue(self.distributor.server_proc.is_alive())
 
-        self.socket.connect(url)
-
         time_limit = 1
-        tracker = self.socket.send(json.dumps(stop_message),
-                              copy=False, track=True)
-        start_time = time.clock()
-        while(not tracker.done):
-            elapsed = time.clock() - start_time
-            self.assertFalse(elapsed > time_limit,
-                             'Timeout while sending message to server')
-            time.sleep(0.1)
+        sent, resp = send_recv(self.context, url, json.dumps(stop_message),
+                                 timeout=time_limit)
+        self.assertTrue(sent)
 
-        resp = parse_json(self.socket.recv())
+        resp = parse_json(resp)
         self.assertTrue('status' in resp)
         self.assertTrue(resp['status'] == 'stopping')
 
@@ -131,7 +131,7 @@ class TestDistributor(unittest.TestCase):
         self.assertTrue(self.distributor.server_proc.is_alive())
 
         num_trials = 100
-        fetcher = JobTransit(url)
+        fetcher = JobTransit(url, self.context)
 
         for tri in xrange(num_trials):
             job = fetcher.fetch_job()
@@ -194,10 +194,11 @@ class TestDistributor(unittest.TestCase):
     def test_worker_looper(self):
         url = self._start_serving()
         responses = worker_looper(url, self.context)
+        #print responses
         self._stop_serving_clean(url)
         for response in responses:
             self.assertEqual(response['status'], 'success')
-        self.assertFalse(self.distributor.server_procis_alive())
+        self.assertFalse(self.distributor.server_proc.is_alive())
 
     @np.testing.decorators.slow
     def test_report_measurements(self):
