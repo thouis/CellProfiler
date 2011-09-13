@@ -27,22 +27,33 @@ def run_distributed():
     return (force_run_distributed or cpprefs.get_run_distributed())
 
 class WorkServer(Process):
-    def __init__(self, distributor, data_dict, lock):
-        super(WorkServer, self).__init__(target=self.run, args=(data_dict, lock))
-        self.work_queue = distributor.work_queue
-        self.data_dict = data_dict
+    #Member variables accessible to anybody who makes
+    #a get request
+    expose = ['num_remaining', 'pipeline_path', 'pipeline_hash']
+
+    def __init__(self, distributor, init, lock):
+        super(WorkServer, self).__init__()
+        self.distributor = distributor
+        self.address = distributor.address
+        self.port = distributor.port
+        self.init = init
         self.lock = lock
         self.info = {}
-        tocopy = ['pipeline_path', 'output_file', 'address', 'port', 'measurements']
+
+    def _prepare_queue(self):
+        self.work_queue = self.distributor.prepare_queue()
+
+        tocopy = ['pipeline_path', 'pipeline_hash', 'output_file',
+                  'measurements']
         for attr in tocopy:
-            setattr(self, attr, getattr(distributor, attr))
-        self.info['pipeline_path'] = self.pipeline_path
-        self.info['num_remaining'] = self.num_remaining()
-        self.info['pipeline_hash'] = distributor.pipeline_blob_hash
+            setattr(self, attr, getattr(self.distributor, attr))
 
     def run(self):
         with self.lock:
-            self.data_dict['url'] = self._prepare_socket()
+            self._prepare_queue()
+            self.init['url'] = self._prepare_socket()
+            self.init['total_jobs'] = self.num_remaining
+            self.init.update(self.info)
         #Start listening loop. This is blocking
         self._run()
 
@@ -77,49 +88,54 @@ class WorkServer(Process):
                 #TODO Log something
                 pass
             elif(msg['type'] == 'next'):
-                try:
-                    job = self.get_next()
-                except IndexError:
-                    job = None
-                if(job is None):
-                    response = {'status': 'nowork'}
-                else:
-                    response = job
-                    response['num_remaining'] = self.num_remaining()
+                response = self.get_next()
             elif((msg['type'] == 'result') and ('result' in msg)):
                 response = self.report_result(msg)
             elif((msg['type']) == 'command'):
                 response = self.receive_command(msg)
             elif((msg['type']) == 'get'):
+                #General purpose way of querying simple information
                 keys = msg['keys']
                 for key in keys:
                     if(key in self.info):
                         response[key] = self.info[key]
+                    elif(key in self.expose):
+                        response[key] = getattr(self, key, 'notfound')
                     else:
                         response[key] = 'notfound'
                     response['status'] = 'success'
 
             socket.send(json.dumps(response))
-            self.__looping &= (self.num_remaining() > 0)
+            self.__looping &= (self.num_remaining > 0)
 
         self.post_run()
 
     def post_run(self):
         self._socket.close()
-        self._context.term()
+        termcode = self._context.term()
+        #print 'server ended with termcode %s' % termcode
 
+    @property
     def num_remaining(self):
         return len(self.work_queue)
 
     def get_next(self):
-        return self.work_queue.get_next()
+        try:
+            job = self.work_queue.get_next()
+        except IndexError:
+            job = None
+
+        if(job is None):
+            response = {'status': 'nowork'}
+        else:
+            response = job
+        response['num_remaining'] = self.num_remaining
+        return response
 
     def report_result(self, msg):
         id = msg['id']
         pipeline_hash = msg['pipeline_hash']
-        #rep_item = {'id': id, 'pipeline_hash':pipeline_hash}
         try:
-            #work_item = self.work_queue.remove(rep_item)
             work_item_index = self.work_queue.lookup(id)
             work_item = self.work_queue[work_item_index]
         except ValueError:
@@ -128,7 +144,6 @@ class WorkServer(Process):
         response = {'status': 'failure'}
         if(work_item is None):
             resp = 'work item %s not found' % (id)
-            #print resp
             response['code'] = resp
         elif(pipeline_hash != work_item['pipeline_hash']):
             resp = "mismatched pipeline hash"
@@ -149,7 +164,7 @@ class WorkServer(Process):
             del self.work_queue[work_item_index]
             self._jobs_finished += 1
             response = {'status': 'success',
-                        'num_remaining': self.num_remaining()}
+                        'num_remaining': self.num_remaining}
         return response
 
     def receive_command(self, msg):
@@ -157,7 +172,8 @@ class WorkServer(Process):
         Control commands from client to server.
 
         For now we use these for testing, should implement
-        some type of security before release
+        some type of security before release. Easiest
+        would be to use process.authkey
         """
         command = msg['command'].lower()
         if(command == 'stop'):
@@ -176,30 +192,50 @@ class WorkServer(Process):
         return response
 
 class Distributor(object):
+    sharekeys = ['pipeline_path', 'url', 'output_file', 'total_jobs']
     def __init__(self, pipeline, output_file, address="tcp://127.0.0.1", port=None):
+        self.init = {}
         self.pipeline = pipeline
+        self.pipeline_path = None
         self.output_file = output_file
         self.address = address
         self.port = port
-        self.url = None
         self.work_queue = QueueDict()
-        self.pipeline_path = None
+
+    #Not sure if this is a great idea, but seems like the
+    #best available option. We share some fields
+    #with the WorkServer, this allows the two to communicate
+    #that information 
+    def __getattr__(self, name):
+        if name in self.sharekeys:
+            return self.init[name]
+
+    def __setattr__(self, name, value):
+        if name in self.sharekeys:
+            self.init[name] = value
+        else:
+            object.__setattr__(self, name, value)
 
     def start_serving(self):
         manager = Manager()
         lock = Lock()
-        data_dict = manager.dict()
+        self.init = manager.dict(self.init)
         #args = (self, data_dict, lock)
-        self.prepare_queue()
-        self.server_proc = WorkServer(self, data_dict, lock)
+        #self.prepare_queue()
+        self.server_proc = WorkServer(self, self.init, lock)
         self.server_proc.start()
 
         #Can't be sure the child thread will acquire
         #the lock first. Loop until it does.
-        while(self.url is None):
+        getkeys = self.sharekeys
+        def haveall(toget, dic):
+            which = map(lambda s:s in dic, toget)
+            return reduce(lambda x, y: x and y, which)
+        while(not haveall(getkeys, self.init)):
             with lock:
-                if 'url' in data_dict:
-                    self.url = data_dict['url']
+                for key in getkeys:
+                    if key in self.init:
+                        setattr(self, key, self.init[key])
 
         if(self.port is None):
             self.port = int(self.url.split(':')[2])
@@ -209,6 +245,8 @@ class Distributor(object):
         if(self.is_running() and not force):
             return False
         elif(self.is_running()):
+            #XXX This is bad, can corrupt resources and 
+            #create orphan threads
             self.server_proc.terminate()
 
         self.work_queue.clear()
@@ -282,13 +320,14 @@ class Distributor(object):
 
         # we use the hash to make sure old results don't pollute new
         # ones, and that workers are fetching what they expect.
-        self.pipeline_blob_hash = hashlib.sha1(pipeline_blob).hexdigest()
+        self.pipeline_hash = hashlib.sha1(pipeline_blob).hexdigest()
 
         # add jobs for each image set
         #XXX Maybe use guid instead of img_set_index?
         for img_set_index in range(image_set_list.count()):
             job = {'id':img_set_index + 1,
-                   'pipeline_hash':self.pipeline_blob_hash}
+                   'pipeline_path':self.pipeline_path,
+                   'pipeline_hash':self.pipeline_hash}
             self.work_queue.append(job)
 
         self.total_jobs = image_set_list.count()

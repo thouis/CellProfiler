@@ -92,6 +92,7 @@ class TestDistributor(unittest.TestCase):
         self.distributor.server_proc.join(time_delay)
         #Server will loop forever unless it hits an error
         self.assertTrue(self.distributor.server_proc.is_alive())
+        #self._stop_serving_clean(url)
         self.distributor.stop_serving(force=True)
 
     def test_stop_serving(self):
@@ -179,6 +180,8 @@ class TestDistributor(unittest.TestCase):
         expected = set(xrange(1, num_jobs + 1))
         self.assertTrue(expected, received)
 
+        self._stop_serving_clean(url)
+
     @np.testing.decorators.slow
     @unittest.skip('slow')
     def test_single_job(self):
@@ -228,8 +231,12 @@ class TestDistributor(unittest.TestCase):
         pipeline = Pipeline()
         pipeline.load(pipeline_path)
 
-        run_pipeline_headless(pipeline, output_file_path, self.address, self.port)
-
+        results = run_pipeline_headless(pipeline, output_file_path, self.address, self.port)
+        notdone = True
+        while notdone:
+            notdone = True
+            for res in results:
+                notdone &= not res.ready()
         ref_meas = cpmeas.load_measurements(ref_data_path)
         test_meas = cpmeas.load_measurements(output_file_path)
 
@@ -246,7 +253,7 @@ def check_feature(feat_name):
 
 def suite():
     suite = unittest.TestSuite()
-    suite.addTest(TestDistributor('test_worker_looper'))
+    suite.addTest(TestDistributor('test_wound_healing'))
     return suite
 
 if __name__ == "__main__":

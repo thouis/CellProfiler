@@ -30,7 +30,8 @@ def worker_looper(url, context=None):
     """
     has_work = True
     responses = []
-    if(context is None):
+    context_supplied = context is not None
+    if(not context_supplied):
         context = zmq.Context()
     transit = JobTransit(url, context)
     while has_work:
@@ -43,6 +44,8 @@ def worker_looper(url, context=None):
             has_work = num_remaining > 0
         else:
             has_work = False
+    if(not context_supplied):
+        termcode = context.term()
     return responses
 
 def single_job(jobinfo):
@@ -73,16 +76,19 @@ def run_multiple_workers(url, num_workers=None):
     """
     if(not num_workers):
         num_workers = multiprocessing.cpu_count()
+    else:
+        num_workers = min(multiprocessing.cpu_count(), num_workers)
 
     pool = multiprocessing.Pool(num_workers)
 
     urls = [url] * num_workers
+    results = []
     for url in urls:
-        pool.apply_async(worker_looper, args=(url,))
+        result = pool.apply_async(worker_looper, args=(url,))
+        results.append(result)
     #Note: The results will not be available immediately
     #because we haven't joined the pool
-    pool.close()
-    return pool
+    return results
 
 def start_serving_headless(pipeline, output_file_path, address, port=None):
     distributor = Distributor(pipeline, output_file_path, address, port)
@@ -93,10 +99,9 @@ def run_pipeline_headless(pipeline, output_file_path,
                             address, port=None):
     distributor = start_serving_headless(pipeline, output_file_path,
                                           address, port)
-
-    pool = run_multiple_workers(distributor.url)
-    pool.join()
-    return pool
+    num_jobs = distributor.total_jobs
+    results = run_multiple_workers(distributor.url, num_workers=num_jobs)
+    return results
 
 if __name__ == '__main__':
     pass
