@@ -122,8 +122,8 @@ class TestDistributor(unittest.TestCase):
         make sure jobs are served over and over
         """
 
-        self.distributor._prepare_queue()
-        num_jobs = self.distributor._total_jobs
+        self.distributor.prepare_queue()
+        num_jobs = self.distributor.total_jobs
         del self.distributor
         self.setUp()
 
@@ -148,8 +148,8 @@ class TestDistributor(unittest.TestCase):
         """
         Get jobs and delete them from server (do not report results)
         """
-        self.distributor._prepare_queue()
-        num_jobs = self.distributor._total_jobs
+        self.distributor.prepare_queue()
+        num_jobs = self.distributor.total_jobs
         del self.distributor
         self.setUp()
 
