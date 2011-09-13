@@ -10,7 +10,7 @@ import base64
 from multiprocessing import Manager, Process, Lock
 
 import logging
-from collections import OrderedDict
+from collections import deque
 logger = logging.getLogger(__name__)
 
 import zmq
@@ -25,17 +25,35 @@ force_run_distributed = False
 def run_distributed():
     return (force_run_distributed or cpprefs.get_run_distributed())
 
-class QueueDict(OrderedDict):
+class QueueDict(deque):
     """
-    Dictionary we can use as a queue
+    Queue which provides for some dictionary-like access
     """
 
-    def rotate(self, n=1):
-        value = None
-        for stp in xrange(0, n):
-            key, value = self.popitem(last=False)
-            self[key] = value
-        return [key, value]
+    def lookup(self, value, key='id'):
+        """
+        Search the list and return the index for which self[index][`key`] = value
+        
+        Note that `key` is not required to exist in any (or all) elements, but
+        performance will be worse if it does not.
+        """
+        for index, el in enumerate(self):
+            try:
+                val = el[key]
+                if(val == value):
+                    return index
+            except KeyError:
+                pass
+        raise ValueError('%s not found for key %s' % (value, key))
+
+    def remove_bylookup(self, value, key='id'):
+        index = self.lookup(value, key)
+        self.remove(self[index])
+
+    def get_next(self):
+        value = self[0]
+        self.rotate(1)
+        return value
 
 #Yay Windows! Can't start run bound methods using Process.__init__
 def start_serving(distributor, data_dict, lock):
@@ -142,8 +160,9 @@ class Distributor(object):
         # add jobs for each image set
         #XXX Maybe use guid instead of img_set_index?
         for img_set_index in range(image_set_list.count()):
-            self._work_queue[img_set_index + 1] = \
-                {'pipeline_hash': self._pipeline_blob_hash}
+            job = {'id':img_set_index + 1,
+                   'pipeline_hash':self._pipeline_blob_hash}
+            self._work_queue.append(job)
 
         self._total_jobs = image_set_list.count()
         return self._work_queue
@@ -180,14 +199,15 @@ class Distributor(object):
             elif(msg['type'] == 'pipeline_path'):
                 response = self._get_pipeline_info()
             elif(msg['type'] == 'next_job'):
-                job = self._get_next()
+                try:
+                    job = self._get_next()
+                except IndexError:
+                    job = None
                 if(job is None):
                     response = {'status': 'nowork'}
                 else:
-                    #job = [key,value]. value is a dict of the properties
-                    response = {'id': job[0],
-                                'num_remaining': self._num_remaining()}
-                    response.update(job[1])
+                    response = job
+                    response['num_remaining'] = self._num_remaining()
             elif((msg['type'] == 'result') and ('result' in msg)):
                 response = self._report_result(msg)
             elif((msg['type']) == 'command'):
@@ -203,25 +223,27 @@ class Distributor(object):
         return len(self._work_queue)
 
     def _get_next(self):
-        try:
-            return self._work_queue.rotate()
-        except KeyError:
-            #No work left
-            return None
+        return self._work_queue.get_next()
 
     def _get_pipeline_info(self):
         return {'path': self._pipeline_path,
                     'pipeline_hash': self._pipeline_blob_hash}
 
     def _report_result(self, msg):
-        jobnum = msg['id']
+        id = msg['id']
         pipeline_hash = msg['pipeline_hash']
-        work_item = self._work_queue.get(jobnum, None)
+        #rep_item = {'id': id, 'pipeline_hash':pipeline_hash}
+        try:
+            #work_item = self._work_queue.remove(rep_item)
+            work_item_index = self._work_queue.lookup(id)
+            work_item = self._work_queue[work_item_index]
+        except ValueError:
+            work_item = None
         #print work_item
         response = {'status': 'failure'}
         if(work_item is None):
-            resp = 'work item %s not found' % (jobnum)
-            print resp
+            resp = 'work item %s not found' % (id)
+            #print resp
             response['code'] = resp
         elif(pipeline_hash != work_item['pipeline_hash']):
             resp = "mismatched pipeline hash"
@@ -239,7 +261,7 @@ class Distributor(object):
             self._measurements.combine_measurements(curr_meas,
                                                    can_overwrite=True)
             del curr_meas
-            del self._work_queue[jobnum]
+            del self._work_queue[work_item_index]
             self._jobs_finished += 1
             response = {'status': 'success',
                         'num_remaining': self._num_remaining()}
@@ -317,6 +339,7 @@ class JobTransit(object):
             return None
         raw_msg = self.socket.recv()
         msg = parse_json(raw_msg)
+
         if(not msg):
             return None
 
