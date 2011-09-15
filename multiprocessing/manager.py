@@ -73,7 +73,7 @@ class Manager(object):
 
     def on_job_request(self, msg):
         print "JOB REQ", msg
-        self.workers_waiting.append(msg[-2])
+        self.workers_waiting.append(msg[:-1])
         self.feed_workers()
 
     def feed_workers(self):
@@ -90,7 +90,7 @@ class Manager(object):
         print "EXCEPTION", msg
 
     def keep_alive(self):
-        print "KEEP ALIVE", leb(self.workers_waiting)
+        print "KEEP ALIVE", len(self.workers_waiting)
         for worker in self.workers_waiting:
             self.jobs.send_multipart(worker + ['0'])
         self.workers_waiting = []
