@@ -71,8 +71,8 @@ class TestGUI(object):
                 self.send_quit()
                 time.sleep(1)
                 return
-            elif command == 'interrupt':
-                self.send_interrupt()
+            elif command in ['interrupt', 'forcefail']:
+                self.send_interrupt(command)
             else:
                 try:
                     n = int(command)
@@ -87,9 +87,9 @@ class TestGUI(object):
         except:
             pass  # couldn't send quit, probably because the manager went away
 
-    def send_interrupt(self):
+    def send_interrupt(self, command):
         try:
-            self.gui_commands.send("interrupt", flags=zmq.NOBLOCK)
+            self.gui_commands.send(command, flags=zmq.NOBLOCK)
         except:
             pass  # XXX - server probably died
 

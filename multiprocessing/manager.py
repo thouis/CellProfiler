@@ -34,7 +34,11 @@ class Manager(object):
             count = multiprocessing.cpu_count()
         except NotImplementedError:
             count = 2
-        workers = [multiprocessing.Process(target=worker.worker, args=(jobs_port, results_port, control_port, exceptions_port)) for n in range(count)]
+        ports = {'jobs' : jobs_port,
+                 'results' : results_port,
+                 'control' : control_port,
+                 'exceptions' : exceptions_port}
+        workers = [multiprocessing.Process(target=worker.worker, args=(ports,)) for n in range(count)]
         for w in workers:
             w.daemon = True  # autokill when parent exits
             w.start()
@@ -60,19 +64,22 @@ class Manager(object):
         loop.start()
 
     def on_gui_command(self, msg):
+        msg = msg[0]
         print "GUI COMMAND", msg
-        if msg[0] == 'quit':
+        if msg == 'quit':
             self.loop.stop()
-        elif msg[0] == 'interrupt':
-            self.control.send(interrupt, flags=zmq.NOBLOCK)
+        elif msg == 'interrupt':
+            self.control.send('interrupt')
+            self.jobs_waiting = []
+        elif msg == 'forcefail':
+            self.control.send('forcefail', flags=zmq.NOBLOCK)
         else:
             # number of jobs to queue
-            for i in range(int(msg[0])):
+            for i in range(int(msg)):
                 self.jobs_waiting.append("%d" % (i + 1))
             self.feed_workers()
 
     def on_job_request(self, msg):
-        print "JOB REQ", msg
         self.workers_waiting.append(msg[:-1])
         self.feed_workers()
 
@@ -84,13 +91,15 @@ class Manager(object):
             self.gui_feedback.send("sent job %s to %s" % (job, worker))
 
     def on_results(self, msg):
-        print "RESULTS", msg
+        if msg[0] != '0':
+            print "RESULTS recd", msg
 
     def on_exceptions(self, msg):
         print "EXCEPTION", msg
+        worker = msg[:msg.index(b'')]
+        self.exceptions.send_multipart(worker + [b'', 'debug'])
 
     def keep_alive(self):
-        print "KEEP ALIVE", len(self.workers_waiting)
         for worker in self.workers_waiting:
             self.jobs.send_multipart(worker + ['0'])
         self.workers_waiting = []
