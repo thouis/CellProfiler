@@ -69,6 +69,7 @@ class Manager(object):
         if msg == 'quit':
             self.loop.stop()
         elif msg == 'interrupt':
+            print "inter"
             self.control.send('interrupt')
             self.jobs_waiting = []
         elif msg == 'forcefail':
@@ -92,7 +93,7 @@ class Manager(object):
 
     def on_results(self, msg):
         if msg[0] != '0':
-            print "RESULTS recd", msg
+            self.gui_feedback.send("Result job %s : %s" % (msg[0], msg[1]))
 
     def on_exceptions(self, msg):
         print "EXCEPTION", msg

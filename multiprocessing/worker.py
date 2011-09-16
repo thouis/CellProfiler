@@ -39,9 +39,9 @@ class Worker(object):
             try:
                 result = self.do_work(int(work))
             except:
-                result = 0  # in case of exception, return a null result.
+                result = (int(work), 'exception')  # in case of exception, return a null result.
                 self.handle_exception()
-            self.results.send("%s" % result)
+            self.results.send_multipart([work, "%s" % result])
 
     def do_work(self, amount):
         if amount == 0:
