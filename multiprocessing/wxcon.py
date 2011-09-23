@@ -7,6 +7,7 @@ class Console(wx.Frame):
     def __init__(self, *args, **kwargs):
         self.input_queue = kwargs.pop('input_queue')
         self.output_queue = kwargs.pop('output_queue')
+        self.append_newline = kwargs.pop('append_newline', False)
         wx.Frame.__init__(self, *args, **kwargs)
 
         self.output = wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY)
@@ -25,7 +26,8 @@ class Console(wx.Frame):
 
     def on_input(self, evt):
         print "got", self.input.Value
-        self.input_queue.put(self.input.Value)
+        self.input_queue.put(self.input.Value + ('\n' if self.append_newline else ''))
+        print "sent", (self.input.Value + ('\n' if self.append_newline else ''))
         self.output_queue.put("> " + self.input.Value)
         self.input.Value = ""
 
@@ -35,13 +37,21 @@ class Console(wx.Frame):
         except Queue.Empty:
             pass
         else:
-            self.output.Value += "\n%s" % line
+            self.output.AppendText("\n%s" % line)
+            
 
 
 def start_console(input_queue, output_queue):
     app = wx.App(False)
     frame = Console(None, title="test", input_queue=input_queue, output_queue=output_queue)
     app.MainLoop()
+
+def new_console(input_queue, output_queue, title='sub', append_newline=False):
+    print "creating debug guig"
+    def doit():
+        print "doing it "
+        frame = Console(None, title=title, input_queue=input_queue, output_queue=output_queue, append_newline=append_newline)
+    wx.CallAfter(doit)
 
 if __name__ == '__main__':
     start_console(1, 2)

@@ -96,9 +96,16 @@ class Manager(object):
             self.gui_feedback.send("Result job %s : %s" % (msg[0], msg[1]))
 
     def on_exceptions(self, msg):
-        print "EXCEPTION", msg
         worker = msg[:msg.index(b'')]
+        msg = msg[msg.index(b'') + 1:]
+        # XXX - For now, always kick workers into debug mode.  It's
+        # not that costly, it leaves them in a reasonable state, and
+        # sending the "quit" command is sufficient to start them up
+        # again.
         self.exceptions.send_multipart(worker + [b'', 'debug'])
+        # forward information to gui, let it deal with the worker as it will.
+        self.gui_feedback.send('exception')
+        self.gui_feedback.send_multipart(msg)
 
     def keep_alive(self):
         for worker in self.workers_waiting:

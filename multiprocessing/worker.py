@@ -1,6 +1,9 @@
 import time
 import sys
+import os
 import traceback
+import pdb
+import StringIO
 
 import zmq
 
@@ -68,21 +71,51 @@ class Worker(object):
         # it replies with "debug", we start a pdb.post_mortem() on the
         # traceback, connected to a pair of debugging sockets.
         exc_info = self.exc_info = sys.exc_info()
-        self.exceptions.send_multipart([str(exc_info)])
+        # anticipate being requested to be debugged
+        context = zmq.Context()
+        pdbsock_in = context.socket(zmq.PULL)
+        pdbsock_out = context.socket(zmq.PUSH)
+        pdbport_in = pdbsock_in.bind_to_random_port('tcp://127.0.0.1')
+        pdbport_out = pdbsock_out.bind_to_random_port('tcp://127.0.0.1')
+        self.exceptions.send_multipart([str(exc_info), str(pdbport_in), str(pdbport_out)])
         disposition = self.exceptions.recv()
         if disposition == 'debug':
-            # What we should do here: Create a pdb.Pdb instance and a
-            # separate thread that feeds data between pipes connected
-            # to the Pdb instance and a REQ/REP pair linked to the
-            # Manager or GUI.  The postcmd() method of the Pdb
-            # instance should signal the feeder thread to read from
-            # the Pdb stdout and send the result on the socket.  See
-            # the implementation of pdb.post_mortem() for how to use
-            # the Pdb instance.
-            pass
+            # See pdb.post_mortem()
+            print "entering debu"
+            pdb = ZMQPdb(pdbsock_in, pdbsock_out)
+            pdb.reset()
+            pdb.interaction(None, exc_info[2])
+            pdbsock_out.send('quitting')  # signal closing
+        pdbsock_in.close()
+        pdbsock_out.close()
         # see the work loop above, where we'll send a null response
         # after the exception is handled, and hopefully go back to
         # work.
 
+class ZMQPdb(pdb.Pdb):
+    def __init__(self, pdbsock_in=None, pdbsock_out=None):
+        self.sock_in = pdbsock_in
+        self.sock_out = pdbsock_out
+        print "about to start recv"
+        self.stdin_r, self.stdin_w = [os.fdopen(fd, m, 0) for fd, m in zip(os.pipe(), ['r', 'w'])]
+        self.stdout = StringIO.StringIO()
+        pdb.Pdb.__init__(self, stdin=self.stdin_r, stdout=self.stdout)
+        self.prompt = ''
+        self.stdin_w.write(self.sock_in.recv() + '\n')  # start the queue
+
+    # XXX - this needs to be threaded for async
+    def postcmd(self, stop, line):
+        print "in local post", stop, line
+        stop = pdb.Pdb.postcmd(self, stop, line)
+        print "new stop", stop
+        self.sock_out.send(self.stdout.getvalue())  # forward output
+        self.stdout.seek(0)
+        self.stdout.truncate(0)
+        if not stop:
+            # wait for next command
+            self.stdin_w.write(self.sock_in.recv() + '\n')
+        return 0
+
+
 def worker(ports):
-     w = Worker(ports)
+    w = Worker(ports)

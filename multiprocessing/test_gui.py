@@ -53,6 +53,11 @@ class TestGUI(object):
         while True:
             # wait for feedback, post to console
             msg = self.gui_feedback.recv()
+            if msg == 'exception':  # a worker has an exception
+                exc_info = self.gui_feedback.recv_multipart()
+                print "EXCEPTION", exc_info
+                debug_gui = DebugGUI(exc_info)
+                debug_gui.run()
             self.output_queue.put(msg)
 
     def process_commands(self):
@@ -96,6 +101,41 @@ class TestGUI(object):
         except:
             print "failed to send jobs", e
             pass  # XXX - server probably died
+
+class DebugGUI(object):
+    def __init__(self, exc_info):
+        msg, pdbport_in, pdbport_out = exc_info
+
+        # zmq setup
+        context = zmq.Context()
+        self.pdbsock_in = context.socket(zmq.PUSH)
+        self.pdbsock_out = context.socket(zmq.PULL)
+        self.pdbsock_in.connect('tcp://127.0.0.1:%s' % pdbport_in)
+        self.pdbsock_out.connect('tcp://127.0.0.1:%s' % pdbport_out)
+
+        # queues for command input and debugger output
+        self.input_queue = Queue.Queue()
+        self.output_queue = Queue.Queue()
+
+    def read_commands(self):
+        while True:
+            self.pdbsock_in.send(str(self.input_queue.get()))
+
+    def write_output(self):
+        while True:
+            self.output_queue.put(self.pdbsock_out.recv())
+
+    def run(self):
+        input_thread = threading.Thread(target=self.read_commands)
+        output_thread = threading.Thread(target=self.write_output)
+        input_thread.daemon = True
+        output_thread.daemon = True
+        input_thread.start()
+        output_thread.start()
+        # start the wxconsole
+        import wxcon
+        self.output_queue.put("Type quit to exit")
+        wxcon.new_console(self.input_queue, self.output_queue, append_newline=True)
 
 if __name__ == '__main__':
     TestGUI().run()
