@@ -46,16 +46,15 @@ class TestGUI(object):
     def read_commands(self):
         # start the wxconsole
         import wxcon
-        self.output_queue.put("Type quit to exit")
+        self.output_queue.put("Type quit to exit\n")
         wxcon.start_console(self.input_queue, self.output_queue)
 
     def write_output(self):
         while True:
             # wait for feedback, post to console
             msg = self.gui_feedback.recv()
-            if msg == 'exception':  # a worker has an exception
+            if msg == 'exception reported\n':  # a worker has an exception
                 exc_info = self.gui_feedback.recv_multipart()
-                print "EXCEPTION", exc_info
                 debug_gui = DebugGUI(exc_info)
                 debug_gui.run()
             self.output_queue.put(msg)
@@ -134,7 +133,7 @@ class DebugGUI(object):
         output_thread.start()
         # start the wxconsole
         import wxcon
-        self.output_queue.put("Type quit to exit")
+        self.output_queue.put("Type quit to exit\n")
         wxcon.new_console(self.input_queue, self.output_queue, append_newline=True)
 
 if __name__ == '__main__':

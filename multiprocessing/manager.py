@@ -65,11 +65,9 @@ class Manager(object):
 
     def on_gui_command(self, msg):
         msg = msg[0]
-        print "GUI COMMAND", msg
         if msg == 'quit':
             self.loop.stop()
         elif msg == 'interrupt':
-            print "inter"
             self.control.send('interrupt')
             self.jobs_waiting = []
         elif msg == 'forcefail':
@@ -89,11 +87,11 @@ class Manager(object):
             worker = self.workers_waiting.pop(0)
             job = self.jobs_waiting.pop(0)
             self.jobs.send_multipart(worker + [job])
-            self.gui_feedback.send("sent job %s to %s" % (job, worker))
+            self.gui_feedback.send("sent job %s to %s\n" % (job, worker))
 
     def on_results(self, msg):
         if msg[0] != '0':
-            self.gui_feedback.send("Result job %s : %s" % (msg[0], msg[1]))
+            self.gui_feedback.send("Result job %s : %s\n" % (msg[0], msg[1]))
 
     def on_exceptions(self, msg):
         worker = msg[:msg.index(b'')]
@@ -104,8 +102,9 @@ class Manager(object):
         # again.
         self.exceptions.send_multipart(worker + [b'', 'debug'])
         # forward information to gui, let it deal with the worker as it will.
-        self.gui_feedback.send('exception')
+        self.gui_feedback.send('exception reported\n')
         self.gui_feedback.send_multipart(msg)
+        self.gui_feedback.send_multipart('\n')
 
     def keep_alive(self):
         for worker in self.workers_waiting:

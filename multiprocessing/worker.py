@@ -7,6 +7,8 @@ import StringIO
 
 import zmq
 
+import util
+
 class Worker(object):
     def __init__(self, ports):
         theworker = self
@@ -42,9 +44,9 @@ class Worker(object):
             try:
                 result = self.do_work(int(work))
             except:
-                result = (int(work), 'exception')  # in case of exception, return a null result.
+                result = 'exception'  # in case of exception, return a null result.
                 self.handle_exception()
-            self.results.send_multipart([work, "%s" % result])
+            self.results.send_multipart([work, "%s" % (result,)])
 
     def do_work(self, amount):
         if amount == 0:
@@ -72,50 +74,48 @@ class Worker(object):
         # traceback, connected to a pair of debugging sockets.
         exc_info = self.exc_info = sys.exc_info()
         # anticipate being requested to be debugged
-        context = zmq.Context()
-        pdbsock_in = context.socket(zmq.PULL)
-        pdbsock_out = context.socket(zmq.PUSH)
-        pdbport_in = pdbsock_in.bind_to_random_port('tcp://127.0.0.1')
-        pdbport_out = pdbsock_out.bind_to_random_port('tcp://127.0.0.1')
-        self.exceptions.send_multipart([str(exc_info), str(pdbport_in), str(pdbport_out)])
+        pdb = ZMQPdb()
+        self.exceptions.send_multipart([str(exc_info), str(pdb.port_in), str(pdb.port_out)])
         disposition = self.exceptions.recv()
         if disposition == 'debug':
             # See pdb.post_mortem()
-            print "entering debu"
-            pdb = ZMQPdb(pdbsock_in, pdbsock_out)
             pdb.reset()
             pdb.interaction(None, exc_info[2])
-            pdbsock_out.send('quitting')  # signal closing
-        pdbsock_in.close()
-        pdbsock_out.close()
         # see the work loop above, where we'll send a null response
         # after the exception is handled, and hopefully go back to
         # work.
 
 class ZMQPdb(pdb.Pdb):
-    def __init__(self, pdbsock_in=None, pdbsock_out=None):
-        self.sock_in = pdbsock_in
-        self.sock_out = pdbsock_out
-        print "about to start recv"
+    def __init__(self):
+        # create ports
+        context = zmq.Context()
+        self.sock_in = pdbsock_in = context.socket(zmq.PULL)
+        self.sock_out = pdbsock_out = context.socket(zmq.PUSH)
+        self.port_in = pdbsock_in.bind_to_random_port('tcp://127.0.0.1')
+        self.port_out = pdbsock_out.bind_to_random_port('tcp://127.0.0.1')
+
+        # create pipes for pdb input/output
         self.stdin_r, self.stdin_w = [os.fdopen(fd, m, 0) for fd, m in zip(os.pipe(), ['r', 'w'])]
-        self.stdout = StringIO.StringIO()
-        pdb.Pdb.__init__(self, stdin=self.stdin_r, stdout=self.stdout)
+        self.stdout_r, self.stdout_w = [os.fdopen(fd, m, 0) for fd, m in zip(os.pipe(), ['r', 'w'])]
+
+        # init underlying pdb instance
+        pdb.Pdb.__init__(self, stdin=self.stdin_r, stdout=self.stdout_w)
         self.prompt = ''
-        self.stdin_w.write(self.sock_in.recv() + '\n')  # start the queue
 
-    # XXX - this needs to be threaded for async
-    def postcmd(self, stop, line):
-        print "in local post", stop, line
-        stop = pdb.Pdb.postcmd(self, stop, line)
-        print "new stop", stop
-        self.sock_out.send(self.stdout.getvalue())  # forward output
-        self.stdout.seek(0)
-        self.stdout.truncate(0)
-        if not stop:
-            # wait for next command
-            self.stdin_w.write(self.sock_in.recv() + '\n')
-        return 0
+        # create async communication threads
+        self.stop = False
+        self.stdin_thread = util.socket_to_pipe_thread(self.sock_in, self.stdin_w, lambda: self.stop)
+        self.stdout_thread = util.pipe_to_socket_thread(self.stdout_r, self.sock_out, lambda: self.stop)
 
+        self.sock_out.setsockopt(zmq.LINGER, 0)  # allow shutdown with output waiting
+
+    def interaction(self, *args):
+        # start async communication threads
+        self.stdin_thread.start()
+        self.stdout_thread.start()
+        pdb.Pdb.interaction(self, *args)
+        self.stop = True
+        self.sock_out.send('<detaching>')
 
 def worker(ports):
     w = Worker(ports)
