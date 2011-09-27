@@ -221,6 +221,9 @@ class Text(Setting):
         self.metadata_display = kwargs.pop(METADATA_ATTRIBUTE, False)
         super(Text,self).__init__(text, value, *args, **kwargs)
 
+class UneditableList(Text):
+    """A setting for displaying a list of items"""
+
 class RegexpText(Setting):
     """A setting with a regexp button on the side
     """
