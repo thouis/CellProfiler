@@ -1774,25 +1774,26 @@ class Pipeline(object):
         assert module.module_num==module_num,'Misnumbered module. Expected %d, got %d'%(module_num,module.module_num)
         return module
     
-    def add_module(self,new_module):
+    def add_module(self, new_module):
         """Insert a module into the pipeline with the given module #
-        
-        Insert a module into the pipeline with the given module #. 
+
+        Insert a module into the pipeline with the given module #.
         'file_name' - the path to the file containing the variables for the module.
         ModuleNum - the one-based index for the placement of the module in the pipeline
         """
         module_num = new_module.module_num
-        idx = module_num-1
-        self.__modules = self.__modules[:idx]+[new_module]+self.__modules[idx:]
-        for module,mn in zip(self.__modules[idx+1:],range(module_num+1,len(self.__modules)+1)):
-            module.module_num = mn
+        # Generate new settings before insert, so if there are errors, the pipeline doesn't change.
+        # XXX - should catch and display problems with this step.
+        new_settings = [str(setting) for setting in new_module.settings()]
+        self.__modules.insert(module_num - 1, new_module)
+        # renumber modules after this one.
+        for module in self.__modules[module_num:]:
+            module.module_num += 1
         self.notify_listeners(ModuleAddedPipelineEvent(module_num))
-        self.__settings.insert(idx, [str(setting) 
-                                     for setting in new_module.settings()])
+        self.__settings.insert(module_num - 1, new_settings)
         def undo():
             self.remove_module(new_module.module_num)
-        self.__undo_stack.append((undo, 
-                                  "Add %s module" % new_module.module_name))
+        self.__undo_stack.append((undo, "Add %s module" % new_module.module_name))
     
     def remove_module(self,module_num):
         """Remove a module from the pipeline
