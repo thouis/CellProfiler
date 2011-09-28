@@ -221,9 +221,6 @@ class Text(Setting):
         self.metadata_display = kwargs.pop(METADATA_ATTRIBUTE, False)
         super(Text,self).__init__(text, value, *args, **kwargs)
 
-class UneditableList(Text):
-    """A setting for displaying a list of items"""
-
 class RegexpText(Setting):
     """A setting with a regexp button on the side
     """
@@ -450,6 +447,15 @@ class FilenameText(Text):
  
     def set_browsable(self, val):
         self.browsable = val
+
+class PathFileList(Setting):
+    """A setting for displaying an uneditable and possibly large list
+    of paths & filenames."""
+    def __init__(self, text, value, *args, **kwargs):
+        super(PathFileList, self).__init__(text, value, *args, **kwargs)
+
+    def __str__(self):
+        return ""
 
 class ImageFileSpecifier(Text):
     """A setting for choosing an image file, including switching between substring, file globbing, and regular expressions,

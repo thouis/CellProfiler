@@ -409,6 +409,8 @@ class ModuleView:
                     control = self.make_coordinates_control(v,control)
                 elif isinstance(v, cps.RegexpText):
                     control = self.make_regexp_control(v, control)
+                elif isinstance(v, cps.PathFileList):
+                    control = self.make_path_file_list_control(v, control)
                 elif isinstance(v, cps.Measurement):
                     control = self.make_measurement_control(v, control)
                 elif isinstance(v, cps.Divider):
@@ -433,6 +435,7 @@ class ModuleView:
                     flag = wx.ALIGN_LEFT
                 else:
                     control = self.make_text_control(v, control_name, control)
+                assert control is not None
                 sizer.Add(control, 0, flag, border)
                 self.__controls.append(control)
                 help_name = help_ctrl_name(v)
@@ -1120,7 +1123,21 @@ class ModuleView:
                 text = str(text)
             control.Value = text
         return control
-    
+
+    def make_path_file_list_control(self, v, control):
+        if control is None:
+            control = wx.ListCtrl(self.__module_panel, name=edit_control_name(v), style=wx.LC_REPORT)
+            control.SetMinSize(wx.Size(50, 300))
+            control.InsertColumn(0, 'Path')
+            control.InsertColumn(1, 'Filename')
+            control.underlying_data = None
+        if control.underlying_data != v.value:
+            control.underlying_data = v.value
+            control.DeleteAllItems()
+            for path, filename, metadata in v.value:
+                control.Append([path, filename])
+        return control
+
     def make_range_control(self, v, panel):
         """Make a "control" composed of a panel and two edit boxes representing a range"""
         if not panel:
@@ -1780,7 +1797,7 @@ class ModuleSizer(wx.PySizer):
             if not self.__printed_exception:
                 logger.error("WX internal error detected", exc_info=True)
                 self.__printed_exception = True
-                return wx.Size(0,0)
+            return wx.Size(0,0)
 
     def get_row_height(self, j):
         height = 0
@@ -1822,7 +1839,7 @@ class ModuleSizer(wx.PySizer):
                 continue
             control = item.GetWindow()
             assert isinstance(control, wx.StaticText), 'Control at column 0, '\
-                '%d of grid is not StaticText: %s'%(i, str(control))
+                'row %d of grid is not StaticText: %s'%(i, str(control))
             text = control.GetLabel().replace('\n', ' ')
             ctrl_width = control.GetTextExtent(text)[0] + 2 * item.GetBorder()
             width = max(width, ctrl_width)

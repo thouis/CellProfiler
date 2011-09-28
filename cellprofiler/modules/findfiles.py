@@ -69,7 +69,7 @@ class FindFiles(cpm.CPModule):
 
         # XXX - Add multiple matching strategies
 
-        self.file_list = cps.UneditableList(
+        self.file_list = cps.PathFileList(
             'Files found',
             value='',
             doc="""Files matching constraints above.""")
@@ -101,7 +101,7 @@ class FindFiles(cpm.CPModule):
                     ([self.regexp] if self.mode_choice == FILES_REGEXP else [])))
 
     def update_file_list(self):
-        self.file_list.value = "\n".join([os.path.join(path, file) for path, file, metadata in self.collect_files()])
+        self.file_list.value = self.collect_files()
         self.hidden_last_update_settings = self.current_update_settings()
 
     def run(self, workspace):
@@ -149,6 +149,7 @@ class FindFiles(cpm.CPModule):
             files = [self.filter_regexp(path, file_name)
                      for path, file_name in files]
         elif self.mode_choice == FILES_SUBSTRING:
+            # no metadata
             files = [(path, file_name, {})
                      for path, file_name in files
                      if self.substring.value in file_name]
