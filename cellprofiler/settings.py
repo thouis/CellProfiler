@@ -19,6 +19,9 @@ import os
 import sys
 import re
 import uuid
+import pickle
+from cellprofiler.utilities.strict_unpickler import StrictUnpickler
+from cStringIO import StringIO
 from cellprofiler.preferences import \
      DEFAULT_INPUT_FOLDER_NAME, DEFAULT_OUTPUT_FOLDER_NAME,\
      DEFAULT_INPUT_SUBFOLDER_NAME, DEFAULT_OUTPUT_SUBFOLDER_NAME, \
@@ -453,6 +456,23 @@ class PathFileList(Setting):
     of paths & filenames."""
     def __init__(self, text, value, *args, **kwargs):
         super(PathFileList, self).__init__(text, value, *args, **kwargs)
+        self.real_value = []
+
+    def get_value(self):
+        print "fast fetch value"
+        return self.real_value
+
+    def set_value(self, value):
+        if isinstance(value, (str, unicode)):
+            print "set string, unpickling"
+            self.real_value = StrictUnpickler(StringIO(value.decode('string_escape'))).load()
+            self.value_text = value
+        else:
+            print "Set value, pickling"
+            self.real_value = value
+            self.value_text = pickle.dumps(value, 1).encode('string_escape')
+
+    value = property(get_value, set_value)
 
     def __str__(self):
         return ""

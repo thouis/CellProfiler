@@ -71,7 +71,7 @@ class FindFiles(cpm.CPModule):
 
         self.file_list = cps.PathFileList(
             'Files found',
-            value='',
+            value=[],
             doc="""Files matching constraints above.""")
 
         self.hidden_last_update_settings = cps.Text(
@@ -96,13 +96,13 @@ class FindFiles(cpm.CPModule):
             raise cps.ValidationError("Settings have changed since files were last updated.", self.file_list)
 
     def current_update_settings(self):
-        return str((self.location.get_absolute_path(), self.mode_choice,
-                    ([self.substring] if self.mode_choice == FILES_SUBSTRING else []) +
-                    ([self.regexp] if self.mode_choice == FILES_REGEXP else [])))
+        return str((self.location.get_absolute_path(), self.mode_choice.value,
+                    ([self.substring.value] if self.mode_choice == FILES_SUBSTRING else []) +
+                    ([self.regexp.value] if self.mode_choice == FILES_REGEXP else [])))
 
     def update_file_list(self):
         self.file_list.value = self.collect_files()
-        self.hidden_last_update_settings = self.current_update_settings()
+        self.hidden_last_update_settings.value = self.current_update_settings()
 
     def run(self, workspace):
         pass
