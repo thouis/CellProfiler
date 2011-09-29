@@ -459,16 +459,13 @@ class PathFileList(Setting):
         self.real_value = []
 
     def get_value(self):
-        print "fast fetch value"
         return self.real_value
 
     def set_value(self, value):
         if isinstance(value, (str, unicode)):
-            print "set string, unpickling"
             self.real_value = StrictUnpickler(StringIO(value.decode('string_escape'))).load()
             self.value_text = value
         else:
-            print "Set value, pickling"
             self.real_value = value
             self.value_text = pickle.dumps(value, 1).encode('string_escape')
 

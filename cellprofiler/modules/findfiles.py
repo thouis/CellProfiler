@@ -14,6 +14,7 @@ See also <b>ExtractMetadata</b>, <b>MakeImageSets</b>.
 __version__ = "$Revision$"
 
 import os
+import os.path
 import cellprofiler.cpmodule as cpm
 import cellprofiler.settings as cps
 
