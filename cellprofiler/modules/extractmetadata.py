@@ -58,9 +58,10 @@ class ExtractMetadata(cpm.CPModule):
         if self.last_updated_from_list != previous_find_files.file_list.value:
             try:
                 self.file_metadata_list.value = self.update(previous_find_files.file_list.value)
+                self.last_updated_from_list = previous_find_files.file_list.value
             except Exception, e:
                 import traceback
-                raise cps.ValidationError("Exception extracting metadata: %s %s" % (e, traceback.format_exception(*sys.exc_info())), self.regexp)
+                raise cps.ValidationError("Exception extracting metadata: %s\n%s" % (e, "\n".join(traceback.format_exception(*sys.exc_info()))), self.regexp)
 
     def find_findfiles_module(self, pipeline):
         result = None
@@ -87,7 +88,6 @@ class ExtractMetadata(cpm.CPModule):
                 else:
                     yield (path, filename, metadata)
         new_list = [v for v in genlist()]
-        self.last_updated_from_list = file_list
         return new_list
 
     def run(self, workspace):
