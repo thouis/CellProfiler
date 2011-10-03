@@ -1137,14 +1137,35 @@ class ModuleView:
         if control is None:
             control = wx.ListCtrl(self.__module_panel, name=edit_control_name(v), style=wx.LC_REPORT)
             control.SetMinSize(wx.Size(50, 300))
-            control.InsertColumn(0, 'Path')
-            control.InsertColumn(1, 'Filename')
             control.underlying_data = None
         if control.underlying_data != v.value:
             control.underlying_data = v.value
+            # record column widths
+            colwidths = dict([(control.GetColumn(colidx).Text, control.GetColumnWidth(colidx)) \
+                                  for colidx in range(control.ColumnCount)])
+            # clear data
             control.DeleteAllItems()
+            control.DeleteAllColumns()
+            # find all metadata names
+            metadata_cols = set()
             for path, filename, metadata in v.value:
-                control.Append([path, filename])
+                metadata_cols |= set(metadata.keys())
+            # add path, file, metadata cols
+            for idx, colname in enumerate(['Path', 'Filename'] + list(metadata_cols)):
+                if idx == 0:
+                    info = wx.ListItem()
+                    info.m_mask = wx.LIST_MASK_TEXT | wx.LIST_MASK_FORMAT
+                    info.m_text = colname
+                    info.m_format = wx.LIST_FORMAT_RIGHT
+                    control.InsertColumnInfo(0, info)
+                else:
+                    control.InsertColumn(idx, colname)
+                # restore column widths
+                control.SetColumnWidth(idx, colwidths.get(colname, 50))
+            # regenerate data
+            for path, filename, metadata in v.value:
+                data = [path, filename] + [metadata.get(colname, '') for colname in metadata_cols]
+                control.Append(data)
         return control
 
     def make_range_control(self, v, panel):

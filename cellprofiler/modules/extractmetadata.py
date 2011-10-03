@@ -39,7 +39,7 @@ class ExtractMetadata(cpm.CPModule):
             value=[],
             doc="""Files and metadata.""")
 
-        self.last_updated_from_list = None
+        self.last_updated_from = None
         self.last_found_findfiles = None
 
     def settings(self):
@@ -55,10 +55,10 @@ class ExtractMetadata(cpm.CPModule):
         # XXX - this should not be automatic, for reasons of speed
         # and, possibly, thread safety.  But it might be hooked up to
         # updates of FindFiles's list, somehow.
-        if self.last_updated_from_list != previous_find_files.file_list.value:
+        if self.last_updated_from != (self.regexp.value, previous_find_files.file_list.value):
             try:
                 self.file_metadata_list.value = self.update(previous_find_files.file_list.value)
-                self.last_updated_from_list = previous_find_files.file_list.value
+                self.last_updated_from = (self.regexp.value, previous_find_files.file_list.value)
             except Exception, e:
                 import traceback
                 raise cps.ValidationError("Exception extracting metadata: %s\n%s" % (e, "\n".join(traceback.format_exception(*sys.exc_info()))), self.regexp)
