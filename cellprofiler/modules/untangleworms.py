@@ -580,6 +580,8 @@ class UntangleWorms(cpm.CPModule):
                 image.pixel_data & mask, skeleton & mask)
             path_coords, path = self.get_longest_path_coords(
                 graph, np.iinfo(int).max)
+            if len(path_coords) == 0:
+                continue
             cumul_lengths = self.calculate_cumulative_lengths(path_coords)
             if cumul_lengths[-1] == 0:
                 continue
@@ -768,17 +770,20 @@ class UntangleWorms(cpm.CPModule):
         # The path skeletons
         #
         all_path_coords = []
-        if count != 0:
+        if count != 0 and np.sum(skeleton) != 0:
             areas = np.bincount(labels.flatten())
+            skeleton_areas = np.bincount(labels[skeleton])
             current_index = 1
             for i in range(1,count+1):
-                if areas[i] < params.min_worm_area:
+                if (areas[i] < params.min_worm_area or
+                    i >= skeleton_areas.shape[0] or
+                    skeleton_areas[i] == 0):
                     # Completely exclude the worm
                     continue
                 elif areas[i] <= params.max_area:
                     path_coords, path_struct = self.single_worm_find_path(
                         workspace, labels, i, skeleton, params)
-                    if self.single_worm_filter(
+                    if len(path_coords) > 0 and self.single_worm_filter(
                         workspace, path_coords, params):
                         all_path_coords.append(path_coords)
                 else:
@@ -1033,7 +1038,7 @@ class UntangleWorms(cpm.CPModule):
         branch_areas_binary = scind.binary_dilation(
             branch_areas_binary, structure = morph.eight_connect)
         segments_binary = skeleton & ~ branch_areas_binary
-        if max_skel_length is not None:
+        if max_skel_length is not None and np.sum(segments_binary) > 0:
             max_skel_length = max(int(max_skel_length),2) # paranoia
             i, j, labels, order, distance, num_segments = \
              self.trace_segments(segments_binary)
@@ -1181,7 +1186,8 @@ class UntangleWorms(cpm.CPModule):
         labels = labels[ooo]
         order = order[ooo]
         distance = distance[ooo]
-        counts = np.bincount(labels.flatten())[1:]
+        counts = (np.zeros(0, int) if len(labels) == 0 
+                  else np.bincount(labels.flatten())[1:])
         
         branch_ij = np.argwhere(branch_areas_binary)
         if len(branch_ij) > 0:
@@ -1337,6 +1343,7 @@ class UntangleWorms(cpm.CPModule):
         path_list = self.get_all_paths(graph_struct, 0, max_length)
         current_longest_path_coords = []
         current_max_length = 0
+        current_path = None
         for path in path_list:
             path_coords = self.path_to_pixel_coords(graph_struct, path)
             path_length = self.calculate_path_length(path_coords)
