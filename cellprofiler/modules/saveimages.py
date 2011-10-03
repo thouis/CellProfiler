@@ -445,11 +445,11 @@ class SaveImages(cpm.CPModule):
             frame        - display within this frame (or None to not display)
         """
         if self.save_image_or_figure.value in (IF_IMAGE, IF_MASK, IF_CROPPING):
-            should_save = self.run_image(workspace)
+            self.run_image(workspace)
         elif self.save_image_or_figure == IF_MOVIE:
-            should_save = self.run_movie(workspace)
+            self.run_movie(workspace)
         elif self.save_image_or_figure == IF_OBJECTS:
-            should_save = self.run_objects(workspace)
+            self.run_objects(workspace)
         else:
             raise NotImplementedError(("Saving a %s is not yet supported"%
                                        (self.save_image_or_figure)))
@@ -557,6 +557,8 @@ class SaveImages(cpm.CPModule):
         objects_name = self.objects_name.value
         objects = workspace.object_set.get_objects(objects_name)
         filename = self.get_filename(workspace)
+        if filename is None:
+            return
         pixels = objects.segmented
         if ((self.gray_or_color == GC_GRAYSCALE) and 
             (self.file_format in (FF_TIF, FF_TIFF))):
@@ -665,6 +667,8 @@ class SaveImages(cpm.CPModule):
 
         # get the filename and check overwrite before attaching to java bridge
         filename = self.get_filename(workspace)
+        if filename is None:
+            return
         path, fname = os.path.split(filename)
         if os.path.isfile(filename):
             # Important: bioformats will append to files by default, so we must
@@ -794,6 +798,9 @@ class SaveImages(cpm.CPModule):
 
         # get the filename and check overwrite
         filename = self.get_filename(workspace)
+        if filename is None:
+            return
+
         if os.path.isfile(filename):
             # Important: bioformats will append to files by default, so we must
             # delete it explicitly if it exists.
@@ -908,6 +915,8 @@ class SaveImages(cpm.CPModule):
         else:
             mode = 'L'
         filename = self.get_filename(workspace)
+        if filename is None:
+            return
 
         if self.get_file_format() == FF_MAT:
             scipy.io.matlab.mio.savemat(filename,{"Image":pixels},format='5')
@@ -1017,7 +1026,7 @@ class SaveImages(cpm.CPModule):
             os.makedirs(pathname)
         result = os.path.join(pathname, filename)
         if check_overwrite and not self.check_overwrite(result):
-            return
+            return None
         
         return result
     
