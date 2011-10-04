@@ -18,6 +18,8 @@ import os.path
 import cellprofiler.cpmodule as cpm
 import cellprofiler.settings as cps
 
+from bioformats.formatreader import fetch_metadata
+
 from cellprofiler.preferences import \
     DEFAULT_INPUT_FOLDER_NAME, DEFAULT_OUTPUT_FOLDER_NAME, \
     ABSOLUTE_FOLDER_NAME, URL_FOLDER_NAME, \
@@ -148,24 +150,25 @@ class FindFiles(cpm.CPModule):
         files = [(root, file_name) for file_name in listdir(root)]
 
         def make_url(filename):
-            return 'file://' + filename.replace(os.path.sep, '/')
+            mdlist = fetch_metadata(filename)
+            for md in mdlist:
+                md['URL'] = 'file://' + filename.replace(os.path.sep, '/')
+            return mdlist
 
         if self.mode_choice == FILES_REGEXP:
+            return []
             # filter_regexp() will return extra metadata as a dict if it's available
-            files = [self.filter_regexp(path, file_name)
-                     for path, file_name in files]
-        elif self.mode_choice == FILES_SUBSTRING:
-            # no metadata
-            files = [{'URL':make_url(os.path.join(path, file_name))}
-                     for path, file_name in files
-                     if self.substring.value in file_name]
         else:
-            assert self.mode_choice == FILES_ALL
-            # no metadata
-            files = [{'URL':make_url(os.path.join(path, file_name))}
-                      for path, file_name in files]
+            assert self.mode_choice in [FILES_SUBSTRING, FILES_ALL]
+            files = [(path, file_name)
+                     for path, file_name in files
+                     if (self.mode_choice == FILES_ALL) or (self.substring.value in file_name)]
+            files.sort()
+            mdlist = []
+            for path, file_name in files:
+                mdlist += make_url(os.path.join(path, file_name))
 
-        return sorted(files)
+        return mdlist
 
     def upgrade_settings(self, setting_values, variable_revision_number,
                          module_name, from_matlab):

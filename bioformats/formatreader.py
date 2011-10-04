@@ -108,6 +108,8 @@ def make_iformat_reader_class():
                                                '()I','Gets the number of channels per RGB image (if not RGB, this returns 1')
         getSizeC = jutil.make_method('getSizeC', '()I',
                                      'Get the number of color planes')
+        getEffectiveSizeC = jutil.make_method('getEffectiveSizeC', '()I',
+                                              'Get the number of color plane groups')
         getSizeT = jutil.make_method('getSizeT', '()I',
                                      'Get the number of frames in the image')
         getSizeX = jutil.make_method('getSizeX', '()I',
@@ -198,7 +200,7 @@ def make_iformat_reader_class():
             
     return IFormatReader
 
-def get_class_list():
+def get_formats_class_list():
     '''Return a wrapped instance of loci.formats.ClassList'''
     #
     # This uses the reader.txt file from inside the loci_tools.jar
@@ -245,7 +247,7 @@ def make_image_reader_class():
     klass = env.find_class(class_name)
     base_klass = env.find_class('loci/formats/IFormatReader')
     IFormatReader = make_iformat_reader_class()
-    class_list = get_class_list()
+    class_list = get_formats_class_list()
         
     class ImageReader(IFormatReader):
         new_fn = jutil.make_new(class_name, '(Lloci/formats/ClassList;)V')
@@ -348,7 +350,7 @@ def load_using_bioformats(path, c=None, z=0, t=0, series=None, index=None,
         #
         
         env = jutil.get_env()
-        class_list = get_class_list()
+        class_list = get_formats_class_list()
         stream = jutil.make_instance('loci/common/RandomAccessInputStream',
                                      '(Ljava/lang/String;)V', path)
         filename = os.path.split(path)[1]
@@ -467,4 +469,92 @@ def load_using_bioformats(path, c=None, z=0, t=0, series=None, index=None,
         if wants_max_intensity:
             return image, scale
         return image
+    return jutil.run_in_main_thread(fn, True)
+
+def find_bioformats_reader(stream, path):
+        filename = os.path.split(path)[1]
+        env = jutil.get_env()
+        class_list = get_formats_class_list()
+        IFormatReader = make_iformat_reader_class()
+        rdr = None
+        for klass in env.get_object_array_elements(class_list.get_classes()):
+            wclass = jutil.get_class_wrapper(klass, True)
+            maybe_rdr = IFormatReader()
+            maybe_rdr.o = wclass.newInstance()
+            maybe_rdr.setGroupFiles(False)
+            if maybe_rdr.suffixNecessary:
+                if not maybe_rdr.isThisTypeSZ(filename, False):
+                    continue
+                if maybe_rdr.suffixSufficient:
+                    rdr = maybe_rdr
+                    break
+            if (maybe_rdr.isThisTypeStream(stream)):
+                rdr = maybe_rdr
+                break
+        if rdr is None:
+            raise ValueError("Could not find a Bio-Formats reader for %s", path)
+        return rdr
+
+
+def fetch_metadata(path):
+    '''Returns metadata for each (2d, single level) image within a
+    given file.
+    
+    path: path to the file
+    '''
+    def subfn(path):
+        ImageReader = make_image_reader_class()
+        #
+        # Bypass the ImageReader and scroll through the class list. The
+        # goal here is to ask the FormatHandler if it thinks it could
+        # possibly parse the file, then only give the FormatReader access
+        # to the open file stream so it can't damage the file server.
+        #
+        
+        stream = jutil.make_instance('loci/common/RandomAccessInputStream',
+                                     '(Ljava/lang/String;)V', path)
+        try:
+            rdr = find_bioformats_reader(stream, path)
+        except ValueError:
+            yield {'URL' : path}
+            return
+        mdoptions = metadatatools.get_metadata_options(metadatatools.ALL)
+        rdr.setMetadataOptions(mdoptions)
+        omexmlmetadata = metadatatools.createOMEXMLMetadata()
+        rdr.setMetadataStore(omexmlmetadata)
+        rdr.setId(path)
+        metadata = metadatatools.MetadataRetrieve(omexmlmetadata)
+        for series in range(rdr.getSeriesCount()):
+            for z in range(rdr.getSizeZ()):
+                # multichannel RGB-type images don't always number
+                # them separately in the C channel
+                for c in range(rdr.getEffectiveSizeC()):
+                    for t in range(rdr.getSizeT()):
+                        RGBChannelCount = rdr.getRGBChannelCount()
+                        index = rdr.getIndex(z, c, t)
+                        index0 = rdr.getIndex(z, 0, t)
+                        channel_name = metadata.getChannelName(index0, c) or metadata.getChannelID(index0, c)
+                        out_dict = {'URL' : path,
+                                    'series' : series,
+                                    'index' : index,
+                                    'Z' : z,
+                                    'T' : t,
+                                    'C' : c,
+                                    'channel' : channel_name,
+                                    'isRGB' : RGBChannelCount > 1}
+                        if RGBChannelCount > 1:
+                            out_dict['RGBChannelCount'] = RGBChannelCount
+                        yield out_dict
+
+        rdr.close()
+        jutil.call(stream, 'close', '()V')
+        del rdr
+        #
+        # Run the Java garbage collector here.
+        #
+        jutil.static_call("java/lang/System", "gc","()V")
+
+    def fn(path=path):
+        return [v for v in subfn(path)]
+
     return jutil.run_in_main_thread(fn, True)
