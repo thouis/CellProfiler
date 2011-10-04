@@ -15,6 +15,7 @@ __version__ = "$Revision$"
 
 import os
 import os.path
+import re
 import cellprofiler.cpmodule as cpm
 import cellprofiler.settings as cps
 
@@ -126,6 +127,13 @@ class FindFiles(cpm.CPModule):
             return filenames[0]
         return default
 
+    def filter_regexp(self, file_list):
+        pat = re.compile(self.regexp.value)
+        for path, file_name in file_list:
+            m = pat.match(file_name)
+            if m:
+                yield path, file_name, m.groupdict()
+
     def collect_files(self):
         """Collect the files that match the filter criteria
 
@@ -155,8 +163,14 @@ class FindFiles(cpm.CPModule):
                 md['URL'] = 'file://' + filename.replace(os.path.sep, '/')
             return mdlist
 
+        mdlist = []
         if self.mode_choice == FILES_REGEXP:
-            return []
+            files_with_metadata = self.filter_regexp(files)
+            for path, file_name, regexp_metadata in files_with_metadata:
+                md_this_file = make_url(os.path.join(path, file_name))
+                for d in md_this_file:
+                    d.update(regexp_metadata)
+                mdlist += md_this_file
             # filter_regexp() will return extra metadata as a dict if it's available
         else:
             assert self.mode_choice in [FILES_SUBSTRING, FILES_ALL]
