@@ -70,9 +70,10 @@ class FindFiles(cpm.CPModule):
 
         # XXX - Add multiple matching strategies
 
-        self.file_list = cps.PathFileList(
+        self.file_list = cps.DictList(
             'Files found',
             value=[],
+            primary_keys=['URL'],
             doc="""Files matching constraints above.""")
 
         self.hidden_last_update_settings = cps.Text(
@@ -126,7 +127,8 @@ class FindFiles(cpm.CPModule):
     def collect_files(self):
         """Collect the files that match the filter criteria
 
-        Returns a list of tuples, each with (Path, Filename, Metadata).
+        Returns a list of dicts, each with a 'URL' key and possibly
+        other metadata.
 
         Metadata is a dict, present in the case of named groups if
         using regular expressions, as well as implicit values from
@@ -145,19 +147,23 @@ class FindFiles(cpm.CPModule):
 
         files = [(root, file_name) for file_name in listdir(root)]
 
+        def make_url(filename):
+            return 'file://' + filename.replace(os.path.sep, '/')
+
         if self.mode_choice == FILES_REGEXP:
             # filter_regexp() will return extra metadata as a dict if it's available
             files = [self.filter_regexp(path, file_name)
                      for path, file_name in files]
         elif self.mode_choice == FILES_SUBSTRING:
             # no metadata
-            files = [(path, file_name, {})
+            files = [{'URL':make_url(os.path.join(path, file_name))}
                      for path, file_name in files
                      if self.substring.value in file_name]
         else:
             assert self.mode_choice == FILES_ALL
             # no metadata
-            files = [(path, file_name, {}) for path, file_name in files]
+            files = [{'URL':make_url(os.path.join(path, file_name))}
+                      for path, file_name in files]
 
         return sorted(files)
 

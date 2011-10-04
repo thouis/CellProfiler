@@ -34,9 +34,10 @@ class ExtractMetadata(cpm.CPModule):
 
         # XXX - Add multiple matching strategies
 
-        self.file_metadata_list = cps.PathFileList(
+        self.file_metadata_list = cps.DictList(
             'Files and metadata',
             value=[],
+            primary_keys=['URL'],
             doc="""Files and metadata.""")
 
         self.last_updated_from = None
@@ -79,14 +80,14 @@ class ExtractMetadata(cpm.CPModule):
     def update(self, file_list):
         pattern = re.compile(self.regexp.value)
         def genlist():
-            for path, filename, metadata in file_list:
-                m = pattern.search(os.path.join(path, filename))
+            for filedict in file_list:
+                m = pattern.search(filedict['URL'])
                 if m is not None:
-                    d = metadata.copy()
-                    d.update(m.groupdict())
-                    yield (path, filename, d)
+                    d = m.groupdict()
+                    d.update(filedict)
+                    yield d
                 else:
-                    yield (path, filename, metadata)
+                    yield filedict
         new_list = [v for v in genlist()]
         return new_list
 

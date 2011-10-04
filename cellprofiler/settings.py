@@ -451,12 +451,14 @@ class FilenameText(Text):
     def set_browsable(self, val):
         self.browsable = val
 
-class PathFileList(Setting):
+class DictList(Setting):
     """A setting for displaying an uneditable and possibly large list
-    of paths & filenames."""
-    def __init__(self, text, value, *args, **kwargs):
-        super(PathFileList, self).__init__(text, value, *args, **kwargs)
-        self.real_value = []
+    of dictionaries, such as filenames with metadata.
+    """
+    def __init__(self, text, value=[], primary_keys=[], *args, **kwargs):
+        super(DictList, self).__init__(text, '', *args, **kwargs)
+        self.real_value = value
+        self.primary_keys = primary_keys
 
     def get_value(self):
         return self.real_value

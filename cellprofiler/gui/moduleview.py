@@ -418,8 +418,8 @@ class ModuleView:
                     control = self.make_coordinates_control(v,control)
                 elif isinstance(v, cps.RegexpText):
                     control = self.make_regexp_control(v, control)
-                elif isinstance(v, cps.PathFileList):
-                    control = self.make_path_file_list_control(v, control)
+                elif isinstance(v, cps.DictList):
+                    control = self.make_dictlist_control(v, control)
                 elif isinstance(v, cps.Measurement):
                     control = self.make_measurement_control(v, control)
                 elif isinstance(v, cps.Divider):
@@ -1133,7 +1133,7 @@ class ModuleView:
             control.Value = text
         return control
 
-    def make_path_file_list_control(self, v, control):
+    def make_dictlist_control(self, v, control):
         if control is None:
             control = wx.ListCtrl(self.__module_panel, name=edit_control_name(v), style=wx.LC_REPORT)
             control.SetMinSize(wx.Size(50, 300))
@@ -1147,25 +1147,19 @@ class ModuleView:
             control.DeleteAllItems()
             control.DeleteAllColumns()
             # find all metadata names
-            metadata_cols = set()
-            for path, filename, metadata in v.value:
-                metadata_cols |= set(metadata.keys())
-            # add path, file, metadata cols
-            for idx, colname in enumerate(['Path', 'Filename'] + list(metadata_cols)):
-                if idx == 0:
-                    info = wx.ListItem()
-                    info.m_mask = wx.LIST_MASK_TEXT | wx.LIST_MASK_FORMAT
-                    info.m_text = colname
-                    info.m_format = wx.LIST_FORMAT_RIGHT
-                    control.InsertColumnInfo(0, info)
-                else:
-                    control.InsertColumn(idx, colname)
+            colnames = set()
+            for data in v.value:
+                colnames |= set(data.keys())
+            cols = v.primary_keys + sorted(list(colnames - set(v.primary_keys)))
+            # add columns
+            for idx, colname in enumerate(cols):
+                control.InsertColumn(idx, colname,
+                                     format=(wx.LIST_FORMAT_RIGHT if idx == 0 else wx.LIST_FORMAT_LEFT))
                 # restore column widths
                 control.SetColumnWidth(idx, colwidths.get(colname, 50))
             # regenerate data
-            for path, filename, metadata in v.value:
-                data = [path, filename] + [metadata.get(colname, '') for colname in metadata_cols]
-                control.Append(data)
+            for data in v.value:
+                control.Append([data.get(col, "") for col in cols])
         return control
 
     def make_range_control(self, v, panel):
