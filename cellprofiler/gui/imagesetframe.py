@@ -250,6 +250,7 @@ class ImageSetFrame(wx.Frame):
                         self.project.add_image_metadata(d.keys(), d.values(),
                                                         image_id)
             self.update_urlset_pane()
+            self.create_imageset_pane.update()
         finally:
             dlg.Destroy()
             
@@ -517,7 +518,7 @@ class CreateImagesetPane(wx.Panel):
         else:
             self.imageset_name_label.SetForegroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT))
         self.imageset_name_label.Refresh()
-            
+
         if self.has_keys:
             title = "Create image set by metadata"
         else:
@@ -628,7 +629,7 @@ def get_checkbox_bitmap(window, flags, width, height):
     return bitmap
     
 if __name__=="__main__":
-    app = wx.PySimpleApp(True)
+    app = wx.PySimpleApp(False)
     
     frame = ImageSetFrame(None)
     app.MainLoop()

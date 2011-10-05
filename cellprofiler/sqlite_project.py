@@ -491,7 +491,7 @@ class SQLiteProject(object):
                   join image_url iu on iu.id = ui.image_id 
                  where ui.name = ?
                  order by iu.url""", [urlset])
-            return [x[0] for x in self.cursor]
+            return [x for x in self.cursor]
             
         key_table_aliases = ["k%d" % (i+1) for i in range(len(keys))]
         value_table_aliases = ["v%d" % (i+1) for i in range(len(keys))]
