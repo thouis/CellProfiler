@@ -336,6 +336,11 @@ class Project(object):
         '''Delete the named imageset'''
         with self.lock:
             self.backend.remove_imageset(name)
+            
+    def get_imageset_names(self):
+        '''Get the names of the imagesets in the project'''
+        with self.lock:
+            return self.backend.get_imageset_names()
         
     def get_imageset_row_count(self, name):
         '''Return the number of rows in the named imageset'''
@@ -355,6 +360,20 @@ class Project(object):
         '''
         with self.lock:
             return self.backend.get_imageset_row_images(name, image_number)
+        
+    def get_imageset_channels(self, name):
+        '''Return the channels defined on the imageset'''
+        with self.lock:
+            return self.backend.get_imageset_channels(name)
+        
+    def get_imageset_keys(self, name):
+        '''Return the metadata keys defined on the imageset
+        
+        These are informational, are created at the time the imageset
+        was created and might no longer correspond to values on the images.
+        '''
+        with self.lock:
+            return self.backend.get_imageset_keys(name)
         
     def get_imageset_row_metadata(self, name, image_number):
         '''Return the imageset row's metadata values

@@ -480,6 +480,19 @@ class SQLiteProject(object):
         each of the keys for that row's frame. The last value in each
         row of the array is the image_id of the image.
         '''
+        if len(keys) == 0:
+            # Sort of cheating. Get everything.
+            if urlset is None:
+                self.cursor.execute("select id from image_url order by url")
+            else:
+                self.cursor.execute("""
+                select ui.image_id 
+                  from urlset_image ui 
+                  join image_url iu on iu.id = ui.image_id 
+                 where ui.name = ?
+                 order by iu.url""", [urlset])
+            return [x[0] for x in self.cursor]
+            
         key_table_aliases = ["k%d" % (i+1) for i in range(len(keys))]
         value_table_aliases = ["v%d" % (i+1) for i in range(len(keys))]
         fields = []
@@ -772,6 +785,11 @@ class SQLiteProject(object):
         self.cursor.execute(
             """delete from imageset where name = ?""", [name])
         
+    def get_imageset_names(self):
+        '''Get the names of the imagesets in the project'''
+        self.cursor.execute("select name from imageset order by name")
+        return [x[0] for x in self.cursor]
+                
     def get_imageset_row_count(self, name):
         '''Return the number of rows in the named imageset'''
         self.cursor.execute(
@@ -818,6 +836,33 @@ class SQLiteProject(object):
             result[channel].append(image_id)
         return result
         
+    def get_imageset_channels(self, name):
+        '''Get the channels defined on the imageset
+        
+        name - the name of the imageset
+        '''
+        self.cursor.execute("""
+        select ic.name from imageset i 
+          join imageset_channel ic on i.id = ic.imageset_id
+         where i.name = ? order by ic.name""", [ name ])
+        return [x[0] for x in self.cursor]
+    
+    def get_imageset_keys(self, name):
+        '''Get the metadata keys that were used to produce the imageset
+        
+        If the imageset was created by matching image metadata for
+        a set of keys, the keys are stored in the database and each
+        row has a unique set of values per key.
+        
+        name - name of the imageset
+        '''
+        self.cursor.execute("""
+        select mk.key from metadata_key mk
+          join imageset_key ik on ik.key_id = mk.id
+          join imageset i on i.id = ik.imageset_id
+         where i.name = ?""", [ name ])
+        return [x[0] for x in self.cursor]
+    
     def get_imageset_row_metadata(self, name, image_number):
         '''Return the imageset row's metadata values
         
