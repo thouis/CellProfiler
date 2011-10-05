@@ -312,10 +312,10 @@ class CreateImagesetPane(wx.Panel):
         info = wx.ListItem()
         info.m_mask = wx.LIST_MASK_TEXT | wx.LIST_MASK_IMAGE | wx.LIST_MASK_FORMAT
         info.m_image = -1
-        info.m_text = "Metadata value"
+        info.m_text = "Channel name"
         info.m_format = 0
         self.channel_map_ctrl.InsertColumnInfo(0, info)
-        info.m_text = "Channel name"
+        info.m_text = "Metadata value"
         self.channel_map_ctrl.InsertColumnInfo(1, info)
         self.channel_map_ctrl.Bind(wx.EVT_LEFT_DOWN, self.on_channel_ctl_click)
         
@@ -481,6 +481,8 @@ class CreateImagesetPane(wx.Panel):
             else:
                 image = self.checkbox_bitmaps[wx.CONTROL_CHECKED][0]
             self.channel_map_ctrl.SetItemImage(item, image)
+        else:
+            event.Skip()
         
     def on_channel_name_change(self, event):
         self.validate()
@@ -528,7 +530,8 @@ class CreateImagesetPane(wx.Panel):
         else:
             title += " using all images"
         if self.channel_selected:
-            title += " using %s to assign urls to channels" % self.channel_choice.GetSelection()
+            title += (" using %s to assign urls to channels" % 
+                      self.channel_choice.GetStringSelection())
             self.channel_map_ctrl.Show()
             self.channel_name_sizer.ShowItems(False)
         else:
@@ -560,14 +563,27 @@ class CreateImagesetPane(wx.Panel):
         keys = self.to_listbox.GetStrings()
         if self.channel_selected:
             channel = self.channel_choice.GetStringSelection()
+            metadata_values = []
+            channel_names = []
+            for i in range(self.channel_map_ctrl.GetItemCount()):
+                if self.get_channel_ctl_item_check(i):
+                    metadata_value = self.channel_map_ctrl.GetItem(i, 1).GetText()
+                    channel_name = self.channel_map_ctrl.GetItemText(i)
+                    metadata_values.append(metadata_value)
+                    channel_names.append(channel_name)
         else:
             channel = None
+            metadata_values = None
+            channel_names = None
         if self.urlset_selected:
             urlset = self.urlset_choice.GetStringSelection()
         else:
             urlset = None
         self.project.create_imageset(self.imageset_name_ctrl.Value,
-                                     keys, channel, urlset = urlset)
+                                     keys, channel,
+                                     channel_values = metadata_values,
+                                     channel_names = channel_names,
+                                     urlset = urlset)
         self.imageset_frame.update_imageset_choices()
     
 class AddDirectoryDlg(wx.Dialog):

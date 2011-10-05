@@ -302,7 +302,8 @@ class Project(object):
             return self.backend.get_urlset_members(name)
     
     def create_imageset(self, name, keys, channel_key, 
-                        channel_values = None, urlset=None):
+                        channel_values = None, 
+                        channel_names = None, urlset=None):
         '''Create an image set
         
         name - the name of the image set
@@ -318,6 +319,10 @@ class Project(object):
         in the imageset, but not "w3", channel_values would be ["w1", "w2"].
         If None, accept all channel values.
         
+        channel_names - a sequence of names to match the channel metadata
+        values. channel_names can be used to give descriptive names to
+        the channels, for instance "GFP" for "w1".
+        
         Create an image set where each row in the image set has unique values
         for the set of metadata keys. For instance, the keys might be
         "Plate", "Well" and "Site" and a row might have values "P-12345",
@@ -330,7 +335,8 @@ class Project(object):
         '''
         with self.lock:
             return self.backend.create_imageset(name, keys, channel_key,
-                                                channel_values, urlset)
+                                                channel_values, 
+                                                channel_names, urlset)
         
     def remove_imageset(self, name):
         '''Delete the named imageset'''
@@ -459,7 +465,8 @@ class Project(object):
         channel_value - the metadata value for the channel, for instance,
                         "w1" for "wavelength"
         '''
-        with self.lock:
+        #with self.lock:
+        if True:
             return self.backend.add_channel_to_imageset(
                 name, keys, urlset, channel_name, channel_key, channel_value)
     
