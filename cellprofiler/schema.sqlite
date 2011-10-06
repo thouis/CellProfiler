@@ -19,9 +19,8 @@ create table project (
  * is used throughout the schema to point at the URL.
  */
 create table image (
-    image_id integer not null primary key,
+    id integer not null primary key,
     url text not null);
-
 create unique index image_idx on image(url);
 
 /*
@@ -32,13 +31,13 @@ create unique index image_idx on image(url);
  * The parent links directories in the hierarchy.
  */
 create table directory (
-    directory_id integer not null primary key,
+    id integer not null primary key,
     name text not null,
-    parent_directory_id integer,
-    constraint directory_parent_fk foreign key (parent_directory_id)
-        references directory(directory_id));
+    parent_id integer,
+    constraint directory_parent_fk foreign key (parent_id)
+        references directory(id));
 create unique index directory_name_idx on directory(name);
-create index directory_parent_idx on directory(parent_directory_id);
+create index directory_parent_idx on directory(parent_id);
 
 /*
  * Metadata is key/value pairs. I (leek) have normalized the storage
@@ -49,46 +48,46 @@ create index directory_parent_idx on directory(parent_directory_id);
  * some important indices in some of the shorter tables.
  */
 create table metadata_key(
-    metadata_key_id integer not null primary key,
+    id integer not null primary key,
     key text not null);
-create unique index metadata_key_key_idx on metadata_key(key);
+create unique index metadata_key_idx on metadata_key(key);
 
 create table metadata_value(
-    metadata_value_id integer not null primary key,
-    metadata_key_id_fk integer not null,
+    id integer not null primary key,
+    metadata_key_id integer not null,
     value text not null,
-    constraint metadata_key_id_fk foreign key (metadata_key_id_fk)
-        references metadata_key(metadata_key_id));
-create unique index metadata_value_idx on metadata_value(metadata_key_id_fk, value);
+    constraint metadata_key_id_fk foreign key (metadata_key_id)
+        references metadata_key(id));
+create unique index metadata_value_idx on metadata_value(metadata_key_id, value);
 
 create table metadata(
-    metadata_value_id_fk integer not null,
-    image_id_fk integer not null,
-    constraint metadata_pk primary key (metadata_value_id_fk, image_id_fk),
-    constraint metadata_value_fk foreign key (metadata_value_id_fk)
-        references metadata_value (metadata_value_id),
-    constraint metadata_image_fk foreign key (image_id_fk)
-        references image(image_id));
-create index metadata_image_idx on metadata(image_id_fk);
+    metadata_value_id integer not null,
+    image_id integer not null,
+    constraint metadata_pk primary key (metadata_value_id, image_id),
+    constraint metadata_value_fk foreign key (metadata_value_id)
+        references metadata_value(id),
+    constraint metadata_image_fk foreign key (image_id)
+        references image(id));
+create index metadata_image_idx on metadata(image_id);
 
 /*
  * Urlsets are subsets of the urls in the image table
  */
 create table urlset (
-    urlset_id integer not null primary key,
+    id integer not null primary key,
     name text not null);
 create unique index urlset_name_idx on urlset(name);
 
 create table urlset_image (
-    urlset_id_fk integer not null,
-    image_id_fk integer not null,
-    constraint urlset_pk primary key (urlset_id_fk, image_id_fk),
-    constraint urlset_imageset_fk foreign key (urlset_id_fk)
-        references urlset(urlset_id),
-    constraint urlset_image_image_fk foreign key (image_id_fk)
-        references image(image_id)
+    urlset_id integer not null,
+    image_id integer not null,
+    constraint urlset_pk primary key (urlset_id, image_id),
+    constraint urlset_imageset_fk foreign key (urlset_id)
+        references urlset(id),
+    constraint urlset_image_image_fk foreign key (image_id)
+        references image(id)
     );
-create index urlset_image_idx on urlset_image(image_id_fk);
+create index urlset_image_idx on urlset_image(image_id);
 
 /*
  * Image sets are rectangular with the rows being defined by one or
@@ -105,7 +104,7 @@ create index urlset_image_idx on urlset_image(image_id_fk);
  * but it could contain documentation too.
  */
 create table imageset (
-    imageset_id integer not null primary key,
+    id integer not null primary key,
     name text not null
 );
 create unique index imageset_name_idx on imageset(name);
@@ -116,16 +115,16 @@ create unique index imageset_name_idx on imageset(name);
  * order (for instance, "Plate" = 1, "Well" = 2, "Site" = 3)
  */
 create table imageset_key (
-    imageset_key_id integer not null primary key,
-    imageset_id_fk text not null,
-    metadata_key_id_fk not null,
+    id integer not null primary key,
+    imageset_id text not null,
+    metadata_key_id not null,
     sort_order integer not null,
-    constraint imageset_key_id_fk foreign key (imageset_id_fk)
-        references imageset(imageset_id),
-    constraint imageset_key_key_fk foreign key (metadata_key_id_fk)
-        references metadata_key(metadata_key_id));
-create unique index imageset_key_idx on imageset_key(imageset_id_fk, metadata_key_id_fk);
-create unique index imageset_key_sort_idx on imageset_key(imageset_id_fk, sort_order);
+    constraint imageset_key_id_fk foreign key (imageset_id)
+        references imageset(id),
+    constraint imageset_key_key_fk foreign key (metadata_key_id)
+        references metadata_key(id));
+create unique index imageset_key_idx on imageset_key(imageset_id, metadata_key_id);
+create unique index imageset_key_sort_idx on imageset_key(imageset_id, sort_order);
 
 /*
  * channel saves the metadata key/value pairs used to define
@@ -136,54 +135,54 @@ create unique index imageset_key_sort_idx on imageset_key(imageset_id_fk, sort_o
  * than metadata.
  */
 create table channel (
-    channel_id integer not null primary key,
-    imageset_id_fk integer not null,
-    metadata_value_id_fk integer,
+    id integer not null primary key,
+    imageset_id integer not null,
+    metadata_value_id integer,
     name text not null,
-    constraint channel_imageset_fk foreign key (imageset_id_fk)
+    constraint channel_imageset_fk foreign key (imageset_id)
         references imageset(id),
-    constraint channel_fk foreign key (metadata_value_id_fk)
-        references metadata_value(metadata_value_id));
-create unique index channel_idx on channel(imageset_id_fk, metadata_value_id_fk);
-create unique index channel_name_idx on channel(imageset_id_fk, name);
+    constraint channel_fk foreign key (metadata_value_id)
+        references metadata_value(id));
+create unique index channel_idx on channel(imageset_id, metadata_value_id);
+create unique index channel_name_idx on channel(imageset_id, name);
 
 /*
  * imageset_row numbers the rows in each image set
  */
 create table imageset_row (
-    imageset_row_id integer not null primary key,
-    imageset_id_fk integer not null,
+    id integer not null primary key,
+    imageset_id integer not null,
     image_number integer not null,
-    constraint imageset_row_imageset_id_fk foreign key (imageset_id_fk)
-        references imageset(imageset_id));
-create unique index imageset_row_idx on imageset_row (imageset_id_fk, image_number);
+    constraint imageset_row_imageset_id_fk foreign key (imageset_id)
+        references imageset(id));
+create unique index imageset_row_idx on imageset_row (imageset_id, image_number);
 
 /*
  * imageset_metadata saves the metadata values associated with each
  * row in an image set. Each row documents the value for one key.
  */
 create table imageset_metadata (
-    imageset_row_id_fk integer not null,
-    metadata_value_id_fk integer not null,
-    constraint imageset_metadata_pk primary key (imageset_row_id_fk, metadata_value_id_fk),
-    constraint imageset_metadata_row_id_fk foreign key (imageset_row_id_fk)
-        references imageset_row(imageset_row_id),
-    constraint imageset_metadata_metadata_id_fk foreign key (metadata_value_id_fk)
-        references metadata_value(metadata_value_id_fk));
+    imageset_row_id integer not null,
+    metadata_value_id integer not null,
+    constraint imageset_metadata_pk primary key (imageset_row_id, metadata_value_id),
+    constraint imageset_metadata_row_id_fk foreign key (imageset_row_id)
+        references imageset_row(id),
+    constraint imageset_metadata_metadata_id_fk foreign key (metadata_value_id)
+        references metadata_value(id));
         
 /*
  * imageset_image collects the images associated with each imageset row
  * and with each imageset channel
  */
 create table imageset_image (
-    imageset_row_id_fk integer not null,
-    image_id_fk integer not null,
-    channel_id_fk integer not null,
-    constraint imageset_image_pk primary key (imageset_row_id_fk, image_id_fk, channel_id_fk),
-    constraint imageset_image_row_fk foreign key (imageset_row_id_fk)
-        references imageset_row(imageset_row_id),
-    constraint imageset_image_image_fk foreign key (image_id_fk)
-        references image(image_id),
-    constraint imageset_image_channel_fk foreign key (channel_id_fk)
-        references channel(channel_id));
-create index imageset_image_idx on imageset_image(image_id_fk);
+    imageset_row_id integer not null,
+    image_id integer not null,
+    channel_id integer not null,
+    constraint imageset_image_pk primary key (imageset_row_id, image_id, channel_id),
+    constraint imageset_image_row_fk foreign key (imageset_row_id)
+        references imageset_row(id),
+    constraint imageset_image_image_fk foreign key (image_id)
+        references image(id),
+    constraint imageset_image_channel_fk foreign key (channel_id)
+        references channel(id));
+create index imageset_image_idx on imageset_image(image_id);
