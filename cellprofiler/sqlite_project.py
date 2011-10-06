@@ -598,7 +598,8 @@ class SQLiteProject(object):
         return [r[0] for r in self.cursor]
     
     def create_imageset(self, name, keys, channel_key, 
-                        channel_values=None, urlset=None):
+                        channel_values = None, 
+                        channel_names = None, urlset=None):
         '''Create an image set
         
         name - the name of the image set
@@ -613,6 +614,9 @@ class SQLiteProject(object):
         if the channel_key is "wavelength" and you only want "w1" and "w2"
         in the imageset, but not "w3", channel_values would be ["w1", "w2"].
         If None, accept all channel values.
+        
+        channel_names - names matching each channel value. If None, use
+        the channel value as the channel name.
         
         Create an image set where each row in the image set has unique values
         for the set of metadata keys. For instance, the keys might be
@@ -682,13 +686,15 @@ class SQLiteProject(object):
         # if the values are given, create the imageset_channels rows now
         #
         if channel_values is not None:
+            if channel_names is None:
+                channel_names = channel_values
             self.cursor.executemany(
                 """insert into imageset_channel (imageset_id, channel_id, name)
-                select ? as imageset_id, v.id as channel_id, v.value as name
+                select ? as imageset_id, v.id as channel_id, ? as name
                   from metadata_key k join metadata_value v on v.key_id = k.id
                  where k.key = ? and v.value = ?""",
-                [ (imageset_id, channel_key, value) 
-                  for value in channel_values])
+                [ (imageset_id, name, channel_key, value) 
+                  for name, value in zip(channel_names,channel_values)])
         else:
             #
             # Otherwise, we have to select all images that have values
@@ -994,6 +1000,9 @@ class SQLiteProject(object):
         channel_value - the metadata value for the channel, for instance,
                         "w1" for "wavelength"
         '''
+        #
+        # NOTE: this is currently a join between two subqueries. We
+        #       can speed it up by making it into one big select statement.
         #
         # First, add the channel to the imageset_channel
         #

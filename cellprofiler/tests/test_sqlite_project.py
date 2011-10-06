@@ -334,6 +334,42 @@ class TestSQLLiteProject(unittest.TestCase):
                 p = p1 if image_number <= 96 else p2
                 self.assertEqual(p[channel][well], image_ids[0])
     
+    def test_04_03_02_create_imageset_from_some_channels_with_names(self):
+        p1 = self.add_plate(T_PLATE1, 3)
+        p2 = self.add_plate(T_PLATE2, 3)
+        self.project.create_imageset(T_IMAGESET_NAME,
+                                     [M_PLATE, M_WELL], 
+                                     M_CHANNEL,
+                                     channel_values = ["1","3"],
+                                     channel_names = ["DNA", "GFP"])
+        for p in (p1, p2):
+            for src, dest in (("1", "DNA"),("3","GFP")):
+                p[dest] = p[src]
+        channel_names = self.project.get_imageset_channels(T_IMAGESET_NAME)
+        self.assertEqual(len(channel_names), 2)
+        self.assertTrue("DNA" in channel_names)
+        self.assertTrue("GFP" in channel_names)
+        self.assertEqual(self.project.get_imageset_row_count(T_IMAGESET_NAME), 192)
+        for image_index in range(192):
+            image_number = image_index+1
+            plate_name = T_PLATE1 if image_number <= 96 else T_PLATE2
+            well = "%s%02d" % ("ABCDEFGH"[int(image_index / 12) % 8], 
+                                          (image_index % 12) + 1)
+            metadata = self.project.get_imageset_row_metadata(
+                T_IMAGESET_NAME, image_number)
+            self.assertEqual(len(metadata), 2)
+            self.assertTrue(all([x in metadata.keys() for x in (M_PLATE, M_WELL)]))
+            self.assertEqual(metadata[M_PLATE], plate_name)
+            self.assertEqual(metadata[M_WELL], well)
+            result = self.project.get_imageset_row_images(T_IMAGESET_NAME,
+                                                          image_number)
+            self.assertEqual(len(result), 2)
+            self.assertTrue(all([x in result.keys() for x in ("DNA","GFP")]))
+            for channel, image_ids in result.items():
+                self.assertEqual(len(image_ids), 1)
+                p = p1 if image_number <= 96 else p2
+                self.assertEqual(p[channel][well], image_ids[0])
+    
     def test_04_04_create_imageset_from_urlset_and_some_channels(self):
         p1 = self.add_plate(T_PLATE1, 3)
         p2 = self.add_plate(T_PLATE2, 3)
@@ -476,6 +512,23 @@ class TestSQLLiteProject(unittest.TestCase):
                 self.assertEqual(len(image_ids), 1)
                 p = p1 if image_number <= 96 else p2
                 self.assertEqual(p[channel][well], image_ids[0])
+                
+    def test_04_11_get_imageset_channels(self):
+        p1 = self.add_plate(T_PLATE1, 3)
+        self.project.create_imageset(T_IMAGESET_NAME,
+                                     [M_PLATE, M_WELL], M_CHANNEL)
+        channels = self.project.get_imageset_channels(T_IMAGESET_NAME)
+        self.assertEqual(len(channels), 3)
+        self.assertTrue(all([str(i) in channels for i in range(1,4)]))
+        
+    def test_04_12_get_imageset_keys(self):
+        p1 = self.add_plate(T_PLATE1, 3)
+        self.project.create_imageset(T_IMAGESET_NAME,
+                                     [M_PLATE, M_WELL], M_CHANNEL)
+        keys = self.project.get_imageset_keys(T_IMAGESET_NAME)
+        self.assertEqual(len(keys), 2)
+        self.assertTrue(all([x in keys for x in (M_PLATE, M_WELL)]))
+        
         
     def test_05_01_add_directory(self):
         self.project.add_directory("http://www.cellprofiler.org")
