@@ -45,20 +45,20 @@ class Project(object):
       well-specific metadata will be applied to every frame of every channel
       of every site in the well, leading to thousand-fold duplication. So be it.
       
-    * Urlsets. A urleset is a grouping of image planes created by a user
+    * Urlsets. A urlset is a grouping of image planes created by a user
       so that the user can perform operations on a subset of all URLS. For
       instance, a user might want to extract file name metadata using a
       pattern that applies to only files in a certain directory or wants
       to create an imageset using the files for just one plate.
       
-    * Imagesets. An imageset (as opposed to image set in the old terminology)
-      is a rectangle of urls with each row representing the images for
-      one pipeline iteration and each column representing the images for one
-      channel. Generally, but not necessarily, the imageset is organized
-      by metadata keys. One metadata key is used to determine a image plane's
-      channel and a set of other keys are used to locate the row in which
-      the image plane belongs. Each row has a unique set of values for the
-      keys.
+    * Imagesets. An imageset (as opposed to image set in the old terminology) is
+      a 2D array of urls with each row representing the images for one pipeline
+      iteration and each column representing the images for one
+      channel. Generally, but not necessarily, the imageset is organized by
+      metadata keys. One metadata key is used to determine an image plane's
+      channel (i.e., ImageName in CellProfiler) and a set of other keys are
+      used to locate the row in which the image plane belongs (i.e., which other
+      images to group with). Each row has a unique set of values for the keys.
       
     * Pipelines.
     
@@ -103,7 +103,7 @@ class Project(object):
         
         url - url of an image file
         
-        returns the image_id for the URL
+        returns the image ID for the URL
         '''
         with self.lock:
             return self.backend.add_url(url)
@@ -123,7 +123,7 @@ class Project(object):
             return self.backend.get_url(image_id)
     
     def remove_url_by_id(self, image_id):
-        '''Remove a URL, using its image id'''
+        '''Remove a URL, using its image ID'''
         with self.lock:
             self.backend.remove_url_by_id(image_id)
     
@@ -223,7 +223,7 @@ class Project(object):
         key - a key to be removed from a single image's metadata or from
               a sequence of images
          
-        image_id - the image_id of the image or a 1-d array of image ids
+        image_id - the image_id of the image or a 1-d array of image IDs
         '''
         with self.lock:
             self.backend.remove_image_metadata(key, image_id)
@@ -247,12 +247,12 @@ class Project(object):
             return self.backend.get_images_by_metadata(keys, values, urlset)
     
     def make_urlset(self, name):
-        '''Create a frames with a given name
+        '''Create a urlset with a given name
         
         A urlset is a collection of image URLs.
         Sometimes, you might want to only run a pipeline on some
         of the images in the dataset (for instance, illumination correction
-        images or one plate of images). So image set operations take
+        images or one plate of images). Image set operations take
         urlsets to allow this sort of flexibility.
         
         name - the name of the urlset
@@ -278,17 +278,17 @@ class Project(object):
         
         name - the name of the urlset
         
-        image_ids - a 1-d array of image ids to add to the urlset
+        image_ids - a 1-d array of image IDs to add to the urlset
         '''
         with self.lock:
             self.backend.add_images_to_urlset(name, image_ids)
         
     def remove_images_from_urlset(self, name, image_ids):
-        '''Remove frames from a urlset
+        '''Remove images from a urlset
         
         name - the name of the urlset
 
-        image_ids - a 1-d array of image ids to add to the urlset
+        image_ids - a 1-d array of image IDs to remove from the urlset
         '''
         with self.lock:
             self.backend.remove_images_from_urlset(name, image_ids)
@@ -296,7 +296,7 @@ class Project(object):
     def get_urlset_members(self, name):
         '''Return all images in the urlset
         
-        Returns a 1-d array of the image ids in the urlset
+        Returns a 1-d array of the image IDs in the urlset
         '''
         with self.lock:
             return self.backend.get_urlset_members(name)
@@ -308,7 +308,7 @@ class Project(object):
         
         name - the name of the image set
         
-        urlset - the name of the urlset. If None, operate on all frames
+        urlset - the name of the urlset. If None, operate on all images.
         
         keys - the metadata keys that uniquely define an image set row
         
@@ -333,6 +333,9 @@ class Project(object):
         The result of the operation is an image set whose rows can be referenced
         by image number or by key values.
         '''
+        # XXX - Should computation should be moved up from the backend to here,
+        # to avoid duplication of code?  Or is it too backend-specific for
+        # performances reasons?
         with self.lock:
             return self.backend.create_imageset(name, keys, channel_key,
                                                 channel_values, 
@@ -362,7 +365,7 @@ class Project(object):
         returns a dictionary whose key is channel value and whose value
         is a 1-d array of image_ids for that row. An array might be empty for 
         some channel value (missing image) or might contain more than one
-        image id (duplicate images).
+        image ID (duplicate images).
         '''
         with self.lock:
             return self.backend.get_imageset_row_images(name, image_number)
@@ -410,7 +413,7 @@ class Project(object):
         This method can be used to patch up an imageset if the user
         wants to manually correct it image by image.
         
-        image_id - the image id of the image
+        image_id - the image ID of the image
         
         name - the name of the imageset
         
@@ -440,8 +443,8 @@ class Project(object):
         applied to none if its metadata values don't match any in the
         imageset.
         
-        The key set should be a subset (x[:] is a subset of x[:]) of that of the 
-        imageset. The function will identify all rows in the imageset whose
+        The key set should be a subset of (or the same set as) the keys of the
+        imageset. This function will identify all rows in the imageset whose
         metadata values match those of an image in the urlset and will include
         that image in each of the matching rows.
         
