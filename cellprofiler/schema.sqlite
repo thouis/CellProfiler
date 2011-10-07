@@ -1,7 +1,11 @@
 /*
- * CellProfiler project schema
+ * CellProfiler project schema - Refer to the actual python to make sure it matches.
+ *
+ * A note on foreign keys: if table foo refers to bar.baz as a foreign
+ * key, it should be named foo.bar_baz so that the typical comparisons look like this:
+ *    ... where foo.bar_baz = bar.baz ...
  */
- 
+
  /*
   * project table
   *
