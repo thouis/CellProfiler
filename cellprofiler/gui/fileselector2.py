@@ -4,11 +4,38 @@ import os
 import re
 import time
 
+import PIL
+
 try:
     from collections import OrderedDict
 except:
     # http://pypi.python.org/pypi/ordereddict
     from ordereddict import OrderedDict
+
+from bioformats.formatreader import fetch_metadata
+
+import PIL.Image
+SUPPORTED_IMAGE_EXTENSIONS = set(PIL.Image.EXTENSION.keys())
+SUPPORTED_IMAGE_EXTENSIONS.add(".mat")  # NOOoooo!... ok, fine.
+# movies
+SUPPORTED_IMAGE_EXTENSIONS.update(['.avi', '.mpeg', '.stk', '.flex', '.mov', '.tif',
+                                  '.tiff', '.zvi'])
+# bioformats
+SUPPORTED_IMAGE_EXTENSIONS.update([
+        ".1sc", ".2fl", ".afm", ".aim", ".avi", ".co1", ".flex", ".fli", ".gel",
+        ".ics", ".ids", ".im", ".img", ".j2k", ".lif", ".lsm", ".mpeg", ".pic",
+        ".pict", ".ps", ".raw", ".svs", ".stk", ".tga", ".zvi"])
+
+
+def extract_metadata(filename):
+    mdlist = fetch_metadata(filename)
+    for file_metadata in mdlist:
+        md = OrderedDict()
+        md['Filename'] = os.path.basename(filename)
+        md['URL'] = 'file://' + filename.replace(os.path.sep, '/')
+        md.update(file_metadata)
+        md['encoded_data'] = str([md[k] for k in sorted(md.keys())])  # needed to detect duplicates
+        yield md
 
 def substring_filter(val):
     return lambda s: val in s
@@ -183,21 +210,61 @@ class FilterSet(wx.Panel):
     def set_filtered_list(self, filtered_list, feedback):
         self.Parent.set_filtered_list(filtered_list, feedback)
 
+class FileSources(wx.Panel):
+    def __init__(self, parent):
+        wx.Panel.__init__(self, parent)
+        self._file_sources = []
+
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+        add_button = wx.Button(self, label='+', style=wx.BU_EXACTFIT)
+        self.sizer.Add(add_button, flag=wx.ALIGN_BOTTOM | wx.LEFT, border=5)
+        self.SetSizer(self.sizer)
+
+        add_button.Bind(wx.EVT_BUTTON, self.add_source)
+
+    def add_source(self, evt):
+        # this should pop up a dialog allowing selection of a directory, a set
+        # of subdirs, a CSV/XLS file, or an http URL
+        dialog = wx.DirDialog(parent=wx.GetApp().TopWindow, message="Choose directory")
+        if dialog.ShowModal() != wx.ID_OK:
+            dialog.Destroy()
+            return
+        dir = dialog.GetPath()
+        def make_url(filename):
+            mdlist = fetch_metadata(filename)
+            for md in mdlist:
+                md['URL'] = 'file://' + filename.replace(os.path.sep, '/')
+            return mdlist
+
+        def genfiles():
+            for path, dirnames, filenames in os.walk(dir):
+                for f in filenames:
+                    if os.path.splitext(f)[1] in SUPPORTED_IMAGE_EXTENSIONS:
+                        for metadata in extract_metadata(os.path.join(path, f)):
+                            yield metadata
+        self.Parent.add_files([file_metadata for file_metadata in genfiles()])
+        source = wx.TextCtrl(parent=self, value=dir)
+        source.SetToolTip(wx.ToolTip(dir))
+        self.sizer.Insert(0, source, flag=wx.EXPAND)
+        self.Layout()
+        self.Refresh()
+
 class CPImageSetBuilder(wx.Frame):
     def __init__(self, *args, **kwargs):
         kwargs["style"] = wx.DEFAULT_FRAME_STYLE
         wx.Frame.__init__(self, *args, **kwargs)
 
+        self._files = []
+
         self.files = wx.html.HtmlWindow(parent=self)
         self.filters = FilterSet(self, 'filters')
         self.channels = wx.html.HtmlWindow(parent=self)
         self.feedback = wx.html.HtmlWindow(parent=self)
-        self.sources = wx.html.HtmlWindow(parent=self)
+        self.sources = FileSources(parent=self)
         
         self.files.SetPage('files')
         self.channels.SetPage('channels')
         self.feedback.SetPage('feedback')
-        self.sources.SetPage('file sources')
 
         self.topsizer = wx.BoxSizer(wx.HORIZONTAL)
         filters_file_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -218,18 +285,22 @@ class CPImageSetBuilder(wx.Frame):
         self.Layout()
 
     def update_files(self, title='Default list', new_list=None):
-        def genfiles():
-            for path, dirs, files in os.walk('.'):
-                for f in files:
-                    yield (path, f)
         if new_list is None:
-            self._files = [(p, f) for (p, f) in genfiles()]
             new_list = self._files
-        page = '<b>%s</b>\n' % (title)
-        page += '<table border=1 cellspacing=0 cellpadding=2 rules=cols width="100%">\n'
-        page += '<tr align=left><th><b>Filename</b></th><th><b>Pathname</b></th></tr>\n'
-        page += '\n'.join(sorted(['<tr><td>%s</td><td>%s</td></tr>' % (f, p) for p, f in new_list]))
+
+        all_metadata_keys = OrderedDict()  # preserve order
+        for md in new_list:
+            all_metadata_keys.update(md)
+        page = '<table border=1 cellspacing=0 cellpadding=2 rules=cols width="100%">\n'
+        page += '<tr align=left>%s</tr>\n' % ''.join('<th><b>%s</b></th>' % k for k in all_metadata_keys)
+        rows = sorted(['<tr>%s</tr>' % ''.join('<td>%s</td>' % md.get(k, '') for k in all_metadata_keys) for md in new_list])
+        page += '\n'.join(rows)
         page += '</table>'
+
+        # add header
+        num_duplicates = len(self._files) - len(set(f['encoded_data'] for f in self._files))
+        duplicates_warning = '' if num_duplicates == 0 else (' <font color="red">%d duplicates!</font>' % num_duplicates)
+        page = '<b>%s</b>, %d files%s\n' % (title, len(rows), duplicates_warning) + page
         self.files.SetPage(page)
         self.files.Refresh()
 
@@ -238,6 +309,10 @@ class CPImageSetBuilder(wx.Frame):
 
     def set_filtered_list(self, new_list, title):
         self.update_files(title, new_list)
+
+    def add_files(self, new_files):
+        self._files += new_files
+        self.update_files()
 
 class MyApp(wx.App):
     def OnInit(self):
