@@ -3,6 +3,7 @@ import wx.html
 import os
 import re
 import time
+import urllib
 
 import PIL
 
@@ -32,9 +33,13 @@ def extract_metadata(filename):
     for file_metadata in mdlist:
         md = OrderedDict()
         md['Filename'] = os.path.basename(filename)
-        md['URL'] = 'file://' + filename.replace(os.path.sep, '/')
+        md['Pathname'] = os.path.dirname(filename)
+        # XXX - should check for existing parameters
+        md['URL'] = 'file://' + filename.replace(os.path.sep, '/') + '?' + \
+            urllib.urlencode([('series', file_metadata.get('series', '')), \
+                                  ('index', file_metadata.get('index', ''))])
+        file_metadata.pop('URL', '')
         md.update(file_metadata)
-        md['encoded_data'] = str([md[k] for k in sorted(md.keys())])  # needed to detect duplicates
         yield md
 
 def substring_filter(val):
@@ -210,14 +215,49 @@ class FilterSet(wx.Panel):
     def set_filtered_list(self, filtered_list, feedback):
         self.Parent.set_filtered_list(filtered_list, feedback)
 
+class FileSource(wx.Panel):
+    def __init__(self, parent, path):
+        wx.Panel.__init__(self, parent)
+        self._file_list = None
+        self.path = path
+
+        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
+        pathtext = wx.StaticText(self, label=path)
+        pathtext.BackgroundColour = 'white'
+        remove_button = wx.Button(self, label='-', style=wx.BU_EXACTFIT)
+        self.sizer.Add(pathtext, proportion=1, flag=wx.ALL, border=1)
+        self.sizer.Add(remove_button, flag=wx.BOTTOM, border=2)
+
+        self.SetSizer(self.sizer)
+        remove_button.Bind(wx.EVT_BUTTON, self.remove)
+
+    def remove(self, evt):
+        self.Parent.remove_source(self)
+
+    def force_update(self):
+        self._file_list = None
+        self.get_files()
+
+    def get_files(self):
+        if self._file_list is not None:
+            return self._file_list
+        def genfiles():
+            for path, dirnames, filenames in os.walk(self.path):
+                for f in filenames:
+                    yield os.path.join(path, f)
+        return genfiles()
+
+
 class FileSources(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
-        self._file_sources = []
+        self._sources = []
+        self.sources_to_images = OrderedDict()
 
         self.sizer = wx.BoxSizer(wx.VERTICAL)
         add_button = wx.Button(self, label='+', style=wx.BU_EXACTFIT)
-        self.sizer.Add(add_button, flag=wx.ALIGN_BOTTOM | wx.LEFT, border=5)
+        self.sizer.Add(wx.StaticText(parent=self, label='File sources:'))
+        self.sizer.Add(add_button, flag=wx.ALIGN_BOTTOM | wx.ALIGN_LEFT | wx.LEFT, border=3)
         self.SetSizer(self.sizer)
 
         add_button.Bind(wx.EVT_BUTTON, self.add_source)
@@ -229,23 +269,25 @@ class FileSources(wx.Panel):
         if dialog.ShowModal() != wx.ID_OK:
             dialog.Destroy()
             return
-        dir = dialog.GetPath()
-        def make_url(filename):
-            mdlist = fetch_metadata(filename)
-            for md in mdlist:
-                md['URL'] = 'file://' + filename.replace(os.path.sep, '/')
-            return mdlist
-
+        source = FileSource(self, dialog.GetPath())
+        self._sources.append(source)
+        self.sizer.Insert(len(self._sources), source, flag=wx.EXPAND | wx.ALL, border=1)
         def genfiles():
-            for path, dirnames, filenames in os.walk(dir):
-                for f in filenames:
-                    if os.path.splitext(f)[1] in SUPPORTED_IMAGE_EXTENSIONS:
-                        for metadata in extract_metadata(os.path.join(path, f)):
-                            yield metadata
-        self.Parent.add_files([file_metadata for file_metadata in genfiles()])
-        source = wx.TextCtrl(parent=self, value=dir)
-        source.SetToolTip(wx.ToolTip(dir))
-        self.sizer.Insert(0, source, flag=wx.EXPAND)
+            for f in source.get_files():
+                if os.path.splitext(f)[1] in SUPPORTED_IMAGE_EXTENSIONS:
+                    for metadata in extract_metadata(f):
+                        yield metadata
+        self.sources_to_images[source] = [md for md in genfiles()]
+        self.Parent.add_files(self.sources_to_images[source])
+        self.Layout()
+        self.Refresh()
+
+    def remove_source(self, source):
+        self._sources.remove(source)
+        del self.sources_to_images[source]
+        self.sizer.Remove(source)
+        source.Destroy()
+        self.Parent.set_files(sum(self.sources_to_images.values(), []))
         self.Layout()
         self.Refresh()
 
@@ -291,6 +333,7 @@ class CPImageSetBuilder(wx.Frame):
         all_metadata_keys = OrderedDict()  # preserve order
         for md in new_list:
             all_metadata_keys.update(md)
+        # XXX- This should use some sort of hierarchical display for files vs. images.
         page = '<table border=1 cellspacing=0 cellpadding=2 rules=cols width="100%">\n'
         page += '<tr align=left>%s</tr>\n' % ''.join('<th><b>%s</b></th>' % k for k in all_metadata_keys)
         rows = sorted(['<tr>%s</tr>' % ''.join('<td>%s</td>' % md.get(k, '') for k in all_metadata_keys) for md in new_list])
@@ -298,9 +341,10 @@ class CPImageSetBuilder(wx.Frame):
         page += '</table>'
 
         # add header
-        num_duplicates = len(self._files) - len(set(f['encoded_data'] for f in self._files))
-        duplicates_warning = '' if num_duplicates == 0 else (' <font color="red">%d duplicates!</font>' % num_duplicates)
-        page = '<b>%s</b>, %d files%s\n' % (title, len(rows), duplicates_warning) + page
+        # XXX-this should probably compute duplicate images, rather than files.
+        num_duplicates = len(self._files) - len(set(f['URL'] for f in self._files))
+        duplicates_warning = '' if num_duplicates == 0 else (', <font color="red">%d duplicate images!</font>' % num_duplicates)
+        page = '<b>%s</b>, %d images%s\n' % (title, len(rows), duplicates_warning) + page
         self.files.SetPage(page)
         self.files.Refresh()
 
@@ -310,9 +354,14 @@ class CPImageSetBuilder(wx.Frame):
     def set_filtered_list(self, new_list, title):
         self.update_files(title, new_list)
 
+    def set_files(self, new_files):
+        self._files = new_files
+        self.update_files()
+
     def add_files(self, new_files):
         self._files += new_files
         self.update_files()
+
 
 class MyApp(wx.App):
     def OnInit(self):
