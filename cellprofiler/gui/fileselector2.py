@@ -131,9 +131,10 @@ class Clause(wx.Panel):
         filter_info = self.FILTER_CHOICES[self.filter_choice.StringSelection]
         filt = filter_info['filter'](self.value.Value)
         inverted = filter_info.get('inverted', False)
-        idx = 0 if (self.metadata_col.StringSelection == 'Pathname') else 1
+        idx = self.metadata_col.StringSelection
         for pf in filelist:
-            if (inverted and not filt(pf[idx])) or (filt(pf[idx]) and not inverted):
+            if ((inverted and not filt(pf[idx])) or 
+                (filt(pf[idx]) and not inverted)):
                 yield pf
 
 class Filter(wx.Panel):
@@ -329,6 +330,8 @@ class CPImageSetBuilder(wx.Frame):
     def update_files(self, title='Default list', new_list=None):
         if new_list is None:
             new_list = self._files
+        # de generator list
+        new_list = [md for md in new_list]
 
         all_metadata_keys = OrderedDict()  # preserve order
         for md in new_list:
