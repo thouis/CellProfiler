@@ -99,8 +99,12 @@ class Clause(wx.Panel):
         self.metadata_col.Bind(wx.EVT_CHOICE, self.update)
         self.filter_choice.Bind(wx.EVT_CHOICE, self.update)
         self.value.Bind(wx.EVT_TEXT_ENTER, self.update)
+        # XXX - need to figure out how to kill focus when dropdown is selected
+        # while a text window is focused.
         self.value.Bind(wx.EVT_SET_FOCUS, self.set_focus)
+        self.Bind(wx.EVT_SET_FOCUS, self.set_focus)
         self.value.Bind(wx.EVT_KILL_FOCUS, self.lose_focus)
+        self.Bind(wx.EVT_KILL_FOCUS, self.lose_focus)
         add_button.Bind(wx.EVT_BUTTON, self.add)
         remove_button.Bind(wx.EVT_BUTTON, self.remove)
 
@@ -112,11 +116,15 @@ class Clause(wx.Panel):
         self.Refresh()
 
     def set_focus(self, evt):
+        self.SetFocus()  # force stealing focus.  On mac 2.8, the previously
+                         # focused text box might not lose focus.
         self.BackgroundColour = '#ff7777'
         self.Parent.set_focus(self)
         # update the metadata choices after asking the parent to update.  This
         # will call self's own filter() method, storing the list of available
         # columns.
+        # XXX ... but really, we should regenerate each list completely, so the 
+        # choices are up to date immediately.
         previous_metadata_col = self.metadata_col.StringSelection
         if not previous_metadata_col in self.available_metadata_cols:
             # XXX - Probably should warn user.  Especially if the missing data
