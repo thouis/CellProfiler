@@ -112,6 +112,7 @@ class Clause(wx.Panel):
 
     def update(self, evt):
         filter_choice = self.filter_choice.GetStringSelection()
+        # XXX - If the column chosen is a previous filter, add a "True/False" dropdown or a "contains the file"/"does not contain the file"
         self.sizer.Show(self.value, show=self.FILTER_CHOICES[filter_choice].get('takes_value', True))
         self.set_focus(evt)
         self.Layout()
@@ -242,7 +243,7 @@ class FilterSet(wx.Panel):
         add_button.Bind(wx.EVT_BUTTON, self.add_filter)
 
     def add_filter(self, evt):
-        new_filter = Filter(self, 'filter %d' % (len(self._filters) + 1))
+        new_filter = Filter(self, 'Filtered list %d' % (len(self._filters) + 1))
         self._filters.append(new_filter)
         self.sizer.Insert(len(self._filters) - 1, new_filter, flag=wx.EXPAND | wx.ALL, border=2)
         self.Layout()
