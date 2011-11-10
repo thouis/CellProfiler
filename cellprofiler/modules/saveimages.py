@@ -33,7 +33,7 @@ import matplotlib
 import numpy as np
 import os
 import sys
-import Image as PILImage
+import PIL.Image as PILImage
 import scipy.io.matlab.mio
 import traceback
 try:

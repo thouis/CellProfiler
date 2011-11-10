@@ -71,19 +71,19 @@ try:
 except:
     traceback.print_exc()
     has_bioformats = False
-import Image as PILImage
-cached_file_lists = {}
 #
 # Load all the PIL image plugins to initialize PIL in the
 # compiled version of CP
 #
-import BmpImagePlugin
-import DcxImagePlugin
-import EpsImagePlugin
-import GifImagePlugin
-import JpegImagePlugin
-import PngImagePlugin
-import TiffImagePlugin as TIFF
+import PIL.Image as PILImage
+import PIL.BmpImagePlugin
+import PIL.DcxImagePlugin
+import PIL.EpsImagePlugin
+import PIL.GifImagePlugin
+import PIL.JpegImagePlugin
+import PIL.PngImagePlugin
+import PIL.TiffImagePlugin as TIFF
+
 import cellprofiler.dib
 import matplotlib.image
 import scipy.io.matlab.mio
@@ -109,6 +109,8 @@ from cellprofiler.gui.help import USING_METADATA_GROUPING_HELP_REF
 from cellprofiler.gui.errordialog import show_warning
 
 PILImage.init()
+
+cached_file_lists = {}
 
 '''STK TIFF Tag UIC1 - for MetaMorph internal use'''
 UIC1_TAG = 33628
@@ -3127,4 +3129,3 @@ def bad_sizes_warning(first_size, first_filename,
                    first_filename, first_size[1], first_size[0],
                    second_filename, second_size[1], second_size[0])
     return warning
-        

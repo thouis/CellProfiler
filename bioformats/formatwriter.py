@@ -380,7 +380,7 @@ if __name__ == "__main__":
     writer.close()
     
     print 'Done writing image :)'
-#    import Image
+#    import PIL.Image as Image
 #    im = Image.open(out_file, 'r')
 #    im.show()
     
