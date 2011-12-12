@@ -15,13 +15,8 @@ __version__ = "$Revision$"
 import logging
 import sys
 import os
-import numpy as np
-#
-# CellProfiler expects NaN as a result during calculation
-#
-np.seterr(all='ignore')
-
 import optparse
+
 usage = """usage: %prog [options] [<output-file>])
      where <output-file> is the optional filename for the output file of measurements
            when running headless"""
@@ -170,6 +165,12 @@ parser.add_option("-L", "--log-level",
 
 def main():
     options, args = parser.parse_args()
+
+    import numpy as np
+    #
+    # CellProfiler expects NaN as a result during calculation
+    #
+    np.seterr(all='ignore')
 
     try:
         logging.root.setLevel(options.log_level)
