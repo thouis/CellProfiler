@@ -17,6 +17,8 @@ import sys
 import os
 import os.path
 import glob
+from subprocess import call
+
 
 # fix from
 #  http://mail.python.org/pipermail/pythonmac-sig/2008-June/020111.html
@@ -28,6 +30,10 @@ from libtiff.libtiff_ctypes import tiff_h_name
 
 if sys.platform == "darwin":
     os.system("svn info | grep Revision | sed -e 's/Revision:/\"Version/' -e 's/^/VERSION = /' -e 's/$/\"/' > version.py")
+
+# We get libfreetype and libpng from /usr/X11R6/lib
+temp = os.environ.get('DYLD_LIBRARY_PATH', None)
+os.environ['DYLD_LIBRARY_PATH'] = temp + ':/usr/X11/lib' if temp else '/usr/X11/lib'
 
 APPNAME = 'CellProfiler2.0'
 APP = ['CellProfiler.py']
@@ -44,7 +50,7 @@ OPTIONS = {'argv_emulation': True,
            'excludes': ['pylab', 'nose', 'Tkinter', 'Cython', 'scipy.weave'],
            'resources': ['CellProfilerIcon.png', 'cellprofiler/icons'],
            'iconfile' : 'CellProfilerIcon.icns',
-           'frameworks' : ['libtiff.dylib'],
+           'frameworks' : ['libtiff.dylib']
            }
 
 setup(
@@ -54,3 +60,15 @@ setup(
     setup_requires=['py2app'],
     name="CellProfiler2.0"
 )
+
+if sys.argv[-1] == 'py2app':
+    # there should be some way to do this within setup's framework, but I don't
+    # want to figure it out right now, and our setup is going to be changing
+    # significantly soon, anyway.
+    call('find dist/CellProfiler2.0.app -name tests -type d | xargs rm -rf', shell=True)
+    call('lipo dist/CellProfiler2.0.app/Contents/MacOS/CellProfiler2.0 -thin i386 -output dist/CellProfiler2.0.app/Contents/MacOS/CellProfiler2.0', shell=True)
+    call('rm dist/CellProfiler2.0.app/Contents/Resources/lib/python2.7/cellprofiler/icons/*.png', shell=True)
+    call('cp /usr/X11/lib/libfreetype.6.dylib dist/CellProfiler2.0.app/Contents/Frameworks', shell=True)
+    call('cp /usr/X11/lib/libpng12.0.dylib dist/CellProfiler2.0.app/Contents/Frameworks', shell=True)
+    call('find dist/CellProfiler2.0.app -name \*.so -o -name \*.dylib | xargs -n 1 install_name_tool -change "/usr/X11/lib/libfreetype.6.dylib" "@executable_path/../Frameworks/libfreetype.6.dylib"', shell=True)
+    call('find dist/CellProfiler2.0.app -name \*.so -o -name \*.dylib | xargs -n 1 install_name_tool -change "/usr/X11/lib/libpng12.0.dylib" "@executable_path/../Frameworks/libpng12.0.dylib"', shell=True)
