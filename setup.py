@@ -47,7 +47,7 @@ OPTIONS = {'argv_emulation': True,
            'includes': ['numpy', 'wx', 'matplotlib','email.iterators', 'smtplib',
                         'sqlite3', 'libtiff', 'wx.lib.intctrl', 'libtiff.'+tiff_h_name,
                         'xml.dom.minidom'],
-           'excludes': ['pylab', 'nose', 'Tkinter', 'Cython', 'scipy.weave'],
+           'excludes': ['pylab', 'nose', 'Tkinter', 'Cython', 'scipy.weave', 'subimager'],
            'resources': ['CellProfilerIcon.png', 'cellprofiler/icons'],
            'iconfile' : 'CellProfilerIcon.icns',
            'frameworks' : ['libtiff.dylib']
