@@ -375,7 +375,6 @@ class AnalysisRunner(object):
 
         self.post_event(AnalysisFinished(self.measurements, self.cancelled))
         self.stop_workers()
-        self.measurements.close()
         self.measurements = None  # do not hang onto measurements
         self.analysis_id = False  # this will cause the jobserver thread to exit
 
