@@ -28,7 +28,7 @@ import time
 import logging
 logger = logging.getLogger(__name__)
 
-version_number = 1
+version_number = 2
 VERSION = "Version"
 
 # h5py is nice, but not being able to make zero-length selections is a pain.
@@ -49,12 +49,17 @@ def new_setitem(self, args, val):
 setattr(h5py.Dataset, orig_hdf5_setitem.__name__, new_setitem)
 
 def infer_hdf5_type(val):
-    if isinstance(val, str) or np.sctype2char(np.asanyarray(val).dtype) == 'S':
-        return h5py.special_dtype(vlen=str)
     val = np.asanyarray(val)
+    if val.dtype.kind in 'SUa':
+        return np.uint8
     if val.size == 0:
         return int
     return np.asanyarray(val).dtype
+
+def unwrap_strings(data):
+    if data.dtype == np.uint8:  # unsigned int8
+        return data.view(('U', data.size / 4))
+    return data
 
 
 class HDF5Dict(object):
@@ -154,7 +159,8 @@ class HDF5Dict(object):
             self.hdf5_file.flush()
 
     def __del__(self):
-        logger.debug("HDF5Dict.__del__(): %s, temporary=%s", self.filename, self.is_temporary)
+        if logger:  # avoid spurious errors on script shutdown
+            logger.debug("HDF5Dict.__del__(): %s, temporary=%s", self.filename, self.is_temporary)
         self.close()
         
     def close(self):
@@ -187,29 +193,24 @@ class HDF5Dict(object):
         object_name, feature_name, num_idx = idxs
         feature_exists = self.has_feature(object_name, feature_name)
         assert feature_exists
+
         if not np.isscalar(num_idx):
             with self.lock:
                 indices = self.indices[(object_name, feature_name)]
                 dataset = self.get_dataset(object_name, feature_name)
-                return [None if (isinstance(dest, slice) and 
-                                 dest.start is not None and 
-                                 dest.start == dest.stop) else dataset[dest]
-                        for dest in [ indices.get(image_number, slice(0,0))
-                                      for image_number in num_idx]]
+                return [None if (isinstance(src, slice) and
+                                 src.start is not None and
+                                 src.start == src.stop) else unwrap_strings(dataset[src])
+                        for src in [indices.get(image_number, slice(0, 0))
+                                    for image_number in num_idx]]
 
         if not self.has_data(*idxs):
             return None
 
         with self.lock:
-            dest = self.find_index_or_slice(idxs)
-            # it's possible we're fetching data from an image without
-            # any objects, in which case we probably weren't able to
-            # infer a type in __setitem__(), which means there may be
-            # no dataset, yet.
-            if isinstance(dest, slice) and dest.start is not None and dest.start == dest.stop:
-                return np.array([])
+            src = self.find_index_or_slice(idxs)
             dataset = self.get_dataset(object_name, feature_name)
-            return dataset[dest]
+            return unwrap_strings(dataset[src])
 
     def __setitem__(self, idxs, val):
         assert isinstance(idxs, tuple), "Assigning to HDF5_Dict requires a tuple of (object_name, feature_name, integer)"
@@ -234,6 +235,8 @@ class HDF5Dict(object):
 
         with self.lock:
             dataset = self.get_dataset(object_name, feature_name)
+
+            # If we store an integer, then later a float, we need to promote here.
             if dataset.dtype.kind == 'i':
                 if np.asanyarray(val).dtype.kind == 'f':
                     # it's possible we have only stored integers and now need to promote to float
@@ -246,14 +249,20 @@ class HDF5Dict(object):
                                                                                        compression='gzip', shuffle=True, chunks=(self.chunksize,), maxshape=(None,))
                     if vals.size > 0:
                         dataset[:] = vals
-                elif np.asanyarray(val).dtype.kind in ('S', 'a', 'U'):
-                    # we created the dataset without any data, so didn't know the type before
+                elif np.asanyarray(val).dtype.kind in 'SUa':
+                    # we created the dataset without any data, so didn't know the type before.  We defaulted to int, and now need to become a string.
                     sz = dataset.shape[0]
+                    assert sz == 0, "Trying to write a string to an integer-typed array"
                     del self.top_group[object_name][feature_name]['data']
-                    dataset = self.top_group[object_name][feature_name].create_dataset('data', (sz,), dtype=h5py.special_dtype(vlen=str),
+                    dataset = self.top_group[object_name][feature_name].create_dataset('data', (sz,), dtype=np.uint8,
                                                                                        compression='gzip', shuffle=True, chunks=(self.chunksize,), maxshape=(None,))
-
-            if np.isscalar(val):
+            val = np.asanyarray(val)
+            if (val.dtype.kind in 'SUa') or (dataset.dtype == np.uint8):
+                if dataset.dtype == np.uint8:
+                    dataset[dest] = val.astype('U').flatten().view(np.uint8)
+                else:
+                    dataset[dest] = val  # old style HDF5
+            elif np.isscalar(val):
                 dataset[dest] = val
             else:
                 dataset[dest] = np.asanyarray(val).ravel()
@@ -319,8 +328,17 @@ class HDF5Dict(object):
             if (num_idx not in index) and (values is None):
                 return None  # no data
             if values is not None:
-                data_size = np.asanyarray(values).ravel().size
+                values = np.asanyarray(values)
                 feature_group = self.top_group.require_group(object_name).require_group(feature_name)
+                if (values.dtype.kind in 'SUa'):
+                    if ('data' in feature_group) and (feature_group['data'].dtype == h5py.special_dtype(vlen=str)):
+                        # old-style HDF5Ddict: store strings as vlen strings
+                        data_size = values.ravel().size
+                    else:
+                        # store as UTF-8 in uint8s
+                        data_size = values.astype('U').nbytes
+                else:
+                    data_size = values.ravel().size
                 if num_idx in index:
                     sl = index[num_idx]
                     if data_size > (sl.stop - sl.start):
@@ -335,7 +353,6 @@ class HDF5Dict(object):
                 if num_idx not in index:
                     grow_by = data_size
                     # create the measurements if needed
-
                     if not 'data' in feature_group:
                         feature_group.create_dataset('data', (0,), dtype=infer_hdf5_type(values),
                                                      compression='gzip', shuffle=True, chunks=(self.chunksize,), maxshape=(None,))
@@ -454,18 +471,19 @@ def get_top_level_group(filename, group_name = 'Measurements', open_mode='r'):
     return f, f.get(group_name)
 
 if __name__ == '__main__':
+    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
     h = HDF5Dict('temp.hdf5')
-    h['Object1', 'objfeature1', 1] = [1, 2, 3]
-    h['Object1', 'objfeature2', 1] = [1, 2, 3]
-    h['Image', 'f1', 1] = 5
-    h['Image', 'f2', 1] = 4
-    print h['Image', 'f2', 1]
+    h['Object1', 'objfeature1', 1] = 'sdf'
+    h['Image', 'f3', 1] = 'foo'
+    h['Image', 'f3', 2] = 'foo2'
+    print h['Image', 'f3', 1]
+    print h['Image', 'f3', [1,2]]
     h['Image', 'f1', 2] = 6
     h['Image', 'f2', 1] = 6
     print h['Image', 'f2', 1]
     print h['Object1', 'objfeature1', 1]
     h['Object1', 'objfeature1', 2] = 3.0
-    print h['Object1', 'objfeature1', 1]
+    print h['Object1', 'objfeature1', 2]
     h['Object1', 'objfeature1', 1] = [1, 2, 3]
     h['Object1', 'objfeature1', 1] = [1, 2, 3, 5, 6]
     h['Object1', 'objfeature1', 1] = [9, 4.0, 2.5]

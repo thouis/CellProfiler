@@ -587,7 +587,7 @@ class Measurements(object):
         """
         def unwrap_string(v):
             # hdf5 returns string columns as a wrapped type
-            if isinstance(v, str):
+            if isinstance(v, basestring):
                 return unicode(str(v)).decode('unicode_escape')
             return v
         if object_name == EXPERIMENT:
