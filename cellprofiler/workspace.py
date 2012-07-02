@@ -433,6 +433,11 @@ class Workspace(object):
                 from cellprofiler.cpimage import ImageSetList
                 self.__image_set_list = ImageSetList()
             try:
+                # Reraise any exceptions in pipeline.prepare_run()
+                def listener(p, evt):
+                    raise evt.error, None, evt.tb
+                self.pipeline.add_listener(listener, at_front=True)
+
                 result = self.pipeline.prepare_run(self, stop_module)
                 if not self.measurements.has_feature(
                     cpmeas.IMAGE, cpmeas.GROUP_NUMBER):
@@ -466,12 +471,12 @@ class Workspace(object):
                 return result
             except:
                 logger.error("Failed during prepare_run", exc_info=1)
-                return False
+                raise
             finally:
                 if no_image_set_list:
                     self.__image_set_list = None
-        return True
-    
+                self.pipeline.remove_listener(listener)
+
     def add_notification_callback(self, callback):
         '''Add a callback that will be called on a workspace event
         

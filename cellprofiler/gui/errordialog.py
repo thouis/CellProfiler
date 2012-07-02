@@ -44,6 +44,7 @@ def display_error_dialog(*args, **kwargs):
     message - message to display
     tb - traceback
     continue_only - show "continue" option, only
+    always_show - always show error dialog, even if error already seen (default: False)
     remote_exc_info - None (the default) for exceptions in the current process.
         For remote processes:
             (exc_name, exc_message, traceback_text, filename, line_number, remote_debug_callback)
@@ -62,7 +63,7 @@ def display_error_dialog(*args, **kwargs):
 
 
 def _display_error_dialog(frame, exc, pipeline, message=None, tb=None, continue_only=False,
-                          remote_exc_info=None):
+                          remote_exc_info=None, always_show=False):
     '''Display an error dialog, returning an indication of whether to continue
 
     frame - parent frame for application
@@ -101,7 +102,8 @@ def _display_error_dialog(frame, exc, pipeline, message=None, tb=None, continue_
         # console), to prevent the UI from becoming unusable.
         filename, line_number, _, _ = traceback.extract_tb(tb)[-1]
 
-    if (filename, line_number) in previously_seen_error_locations:
+    if (not always_show) and \
+            (filename, line_number) in previously_seen_error_locations:
         if from_subprocess:
             logging.root.error("Previously displayed remote exception:\n%s\n%s",
                                exc_name, traceback_text)

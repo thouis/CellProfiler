@@ -26,6 +26,7 @@ import cpframe
 import random
 import string
 import hashlib
+import traceback
 from cStringIO import StringIO
 
 import cellprofiler.pipeline as cpp
@@ -984,7 +985,8 @@ class PipelineController:
                                      self.__pipeline,
                                      "Failure in analysis startup.",
                                      sys.exc_info()[2],
-                                     continue_only=True)
+                                     continue_only=True,
+                                     always_show=True)
                 self.stop_running()
             return
 
@@ -1359,8 +1361,7 @@ class PipelineController:
         self.__test_controls_panel.GetParent().GetSizer().Layout()
         self.__pipeline.test_mode = True
         try:
-            if not self.__workspace.refresh_image_set():
-                raise ValueError("Failed to get image sets")
+            self.__workspace.refresh_image_set()
             if self.__workspace.measurements.image_set_count == 0:
                 wx.MessageBox("The pipeline did not identify any image sets. "
                               "Please check your settings for any modules that "
@@ -1369,8 +1370,8 @@ class PipelineController:
                               wx.OK | wx.ICON_ERROR, self.__frame)
                 self.stop_debugging()
                 return False
-        except ValueError, v:
-            message = "Error while preparing for run:\n%s"%(v)
+        except Exception:
+            message = "Error while preparing for run:\n%s"%(traceback.format_exc())
             wx.MessageBox(message, "Pipeline error", wx.OK | wx.ICON_ERROR, self.__frame)
             self.stop_debugging()
             return False

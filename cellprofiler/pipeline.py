@@ -2731,8 +2731,11 @@ class Pipeline(object):
         for listener in self.__listeners:
             listener(self,event)
     
-    def add_listener(self, listener):
-        self.__listeners.append(listener)
+    def add_listener(self, listener, at_front=False):
+        if at_front:
+            self.__listeners.insert(0, listener)
+        else:
+            self.__listeners.append(listener)
         
     def remove_listener(self,listener):
         self.__listeners.remove(listener)
